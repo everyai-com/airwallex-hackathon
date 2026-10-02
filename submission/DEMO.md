@@ -28,12 +28,16 @@ This is the recommended Treasury recipe, so give it the most screen time.
 | Goal | "Five obligations, 72 hours, three currencies, and not enough cash to fund them all while holding a USD 9,000 reserve floor." | Wallet + obligations + initial plan |
 | Plan (in code) | "Priority is criticality then deadline; spending is bounded by settled cash above the floor plus a forecast-confidence commitment limit." | FUND Meridian Freight, CONVERT+FUND Steinmetz, DEFER Lowly, ESCALATE Helios |
 | Money moves | "The critical freight invoice is paid first because non-payment stops operations." | Transfer → SENT → PAID |
-| New information | "A customer email contradicts the receipt forecast. Confidence drops 0.86 → 0.42, so the autonomous conversion limit drops USD 6,500 → USD 500 and the same conversion now needs a person." | `NEEDS APPROVAL` + approval gate bound to amount/currency/counterparty/evidence |
+| New information | "A customer email contradicts the receipt forecast — and the analyst layer reads it: direction, confidence, rationale and the sentences it relied on. Only judgment comes from the analyst; the tiers and amounts are code." | Analyst reading `contradicted — confidence 0.42` + cited evidence; autonomous limit 6,500 → 500; `NEEDS APPROVAL` + approval gate bound to amount/currency/counterparty/evidence |
 | Deposit | "The forecast receipt actually lands." | Simulated deposit posts immediately (response says PENDING) |
 | Revised decision | "Only decisions the new cash changes are reopened — Lowly still deferred, Helios still escalated." | Recalculated plan |
-| Outcome | "One FX conversion (minimum amount, SWIFT fee included, single-use quote) and the supplier payment; reserve confirmed above the floor." | Final wallet + reserve vs floor |
+| Outcome | "One FX conversion (minimum amount, SWIFT fee included, single-use quote) and the supplier payment; reserve confirmed above the floor." | Final wallet + reserve vs floor + **decision ledger** |
+| Close | "Every action is accounted for: what moved, what waited, what a person must clear." | The ledger table: PAID / CONVERTED / DEFERRED / ESCALATED rows with ids |
 
 Talking points judges love:
+- Run `npm run demo` (alias for kit1). With `ANTHROPIC_API_KEY` set the analyst uses Claude and
+  cites the email verbatim; without it the deterministic analyst produces the same decision.
+  Say that out loud — it shows the model is swappable and the numbers are never model output.
 - The conversion converts **the minimum** (5,400 + 12.85 fee − existing EUR balance),
   and the quote is **booked exactly once**.
 - FX calls carry **no `x-api-version`**, and the approval is **bound to the exact

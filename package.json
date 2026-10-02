@@ -9,6 +9,7 @@
   "scripts": {
     "setup": "tsx src/cli.ts setup",
     "kit1": "tsx src/cli.ts kit1",
+    "demo": "tsx src/cli.ts kit1",
     "kit2": "tsx src/cli.ts kit2",
     "kit3": "tsx src/cli.ts kit3",
     "kit4": "tsx src/cli.ts kit4",

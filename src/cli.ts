@@ -35,6 +35,7 @@ Flags:
   --mock                       Use the in-memory sandbox simulator (no credentials)
   --live                       Force real sandbox calls even if MOCK is set
   --no-auto-approve            Require an interactive prompt for approvals
+  --heuristic                  Force the deterministic analyst (no Claude call)
   --deposit=<amount>           Setup deposit in major units (default 13000)
   --no-deposit                 Setup without simulating a deposit
 `.trim();
@@ -68,7 +69,10 @@ async function main(): Promise<void> {
       });
       break;
     case 'kit1':
-      await runKit1(client, logger, { autoApprove });
+      await runKit1(client, logger, {
+        autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
       break;
     case 'kit2':
       await runKit2(client, logger);
@@ -92,7 +96,10 @@ async function main(): Promise<void> {
       await runKit8(client, logger);
       break;
     case 'all':
-      await runKit1(client, logger, { autoApprove });
+      await runKit1(client, logger, {
+        autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
       await runKit2(client, logger);
       await runKit3(client, logger);
       await runKit4(client, logger);

@@ -11,6 +11,9 @@ export interface Config {
   filesUrl: string;
   mock: boolean;
   dataDir: string;
+  /** Optional: when present, the analyst layer reads unstructured text with Claude. */
+  anthropicApiKey?: string;
+  anthropicModel: string;
 }
 
 function parseDotEnv(file: string): Record<string, string> {
@@ -46,6 +49,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     filesUrl: get('AWX_FILES_URL') ?? 'https://files.sandbox.airwallex.com',
     mock,
     dataDir: resolve(PROJECT_ROOT, get('AWX_DATA_DIR') ?? '.data'),
+    anthropicApiKey: get('ANTHROPIC_API_KEY') || undefined,
+    anthropicModel: get('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-5',
   };
 }
 

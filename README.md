@@ -30,7 +30,8 @@ Each demo follows the same narrative shape the brief asks for:
 
 ```sh
 npm install
-npm run all            # or: npm run kit1 / kit2 / kit3 / kit4
+npm run demo           # alias for kit1, the recommended Treasury recipe
+npm run all            # every kit in sequence
 ```
 
 `npm run all` without a `MOCK` setting needs credentials — add `--mock` to try the simulator:
@@ -38,6 +39,7 @@ npm run all            # or: npm run kit1 / kit2 / kit3 / kit4
 ```sh
 npx tsx src/cli.ts all --mock
 npx tsx src/cli.ts kit1 --mock
+npx tsx src/cli.ts kit1 --mock --heuristic   # force the deterministic analyst
 ```
 
 In mock mode an in-memory transport mirrors sandbox semantics: balances post immediately after a
@@ -88,13 +90,21 @@ confidence (`policy.ts`):
 | 0.5 – 0.8 | USD 3,000 |
 | < 0.5 | USD 500 |
 
+The **analyst layer** (`src/core/analyst.ts`) is the "model reads" half of the brief: given the
+forecast and the raw customer email, it returns only a direction, a confidence, a rationale and
+verbatim citations — never amounts, tiers or floors. With `ANTHROPIC_API_KEY` set it asks Claude
+and falls back to the deterministic heuristic on any failure; without a key (tests, CI, `--mock`)
+it uses the heuristic directly. This is the literal split the hackathon asks for: the model reads
+unstructured text and compares evidence, the code owns every number.
+
 The run: read balances and rates → plan → fund the critical freight invoice → **a customer email
-contradicts the receipt forecast**, lowering confidence so the EUR conversion exceeds the
-autonomous limit and requires a bound human approval → the forecast receipt lands via a simulated
-deposit → recalculate (only decisions the new cash changes reopen) → one FX conversion (quote
-booked exactly once, minimum amount, SWIFT fee included) → one supplier transfer → reserve
-confirmed above the floor. The cheapest obligation stays deferred; the unsanctioned payee stays
-escalated.
+contradicts the receipt forecast**, which the analyst reads and cites, lowering confidence so the
+EUR conversion exceeds the autonomous limit and requires a bound human approval → the forecast
+receipt lands via a simulated deposit → recalculate (only decisions the new cash changes reopen)
+→ one FX conversion (quote booked exactly once, minimum amount, SWIFT fee included) → one supplier
+transfer → reserve confirmed above the floor, followed by a **decision ledger** that shows every
+fund / convert / defer / escalate with its id and reason. The cheapest obligation stays deferred;
+the unsanctioned payee stays escalated with an analyst-written escalation note.
 
 ### Kit 2 — Intent-Bound Purchase Agent (`src/kits/kit2-purchase`)
 
@@ -187,6 +197,7 @@ src/
     errors.ts               AirwallexError with duplicate/insufficient-funds helpers
     ids.ts                  one stable request_id per operation
     approvals.ts            approval gate bound to amount/currency/counterparty/evidence
+    analyst.ts              the "model reads" layer: Claude or deterministic heuristic
     money.ts, parse.ts, log.ts
   api/                      balances, global accounts + deposits, fx, beneficiaries, transfers,
                             issuing, payments/disputes, files, accounts, platform money movement

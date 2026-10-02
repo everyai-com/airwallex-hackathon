@@ -24,6 +24,7 @@ function testConfig(): Config {
     filesUrl: 'https://files.sandbox.airwallex.com',
     mock: true,
     dataDir: '/tmp/awx-test',
+    anthropicModel: 'claude-sonnet-4-5',
   };
 }
 

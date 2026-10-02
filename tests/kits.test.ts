@@ -29,6 +29,7 @@ function testConfig(): Config {
     filesUrl: 'https://files.sandbox.airwallex.com',
     mock: true,
     dataDir: '/tmp/awx-test',
+    anthropicModel: 'claude-sonnet-4-5',
   };
 }
 
@@ -91,7 +92,7 @@ test('kit1 confidence drop flips the conversion to human approval, and approval 
 });
 
 test('kit1 runs end to end against the mock sandbox', async () => {
-  await runKit1(testClient(), logger, { autoApprove: true });
+  await runKit1(testClient(), logger, { autoApprove: true, forceHeuristicAnalyst: true });
 });
 
 // --- Kit 2: purchase cash model ---------------------------------------------

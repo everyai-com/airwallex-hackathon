@@ -9,6 +9,7 @@ import {
 import { createFxConversion, createFxQuote, getFxRate } from '../../api/fx.js';
 import { ensureGlobalAccount, simulateDeposit } from '../../api/global-accounts.js';
 import { createTransfer, simulateTransferTransition } from '../../api/transfers.js';
+import { createAnalyst } from '../../core/analyst.js';
 import { ApprovalGate } from '../../core/approvals.js';
 import type { AirwallexClient } from '../../core/client.js';
 import { RequestIds } from '../../core/ids.js';
@@ -23,6 +24,8 @@ import type { BeneficiaryProfile, Obligation, PlannerResult } from './types.js';
 export interface Kit1Options {
   autoApprove?: boolean;
   depositUsd?: number;
+  /** Force the deterministic analyst (tests, reproducible demos). */
+  forceHeuristicAnalyst?: boolean;
 }
 
 export async function runKit1(
@@ -32,8 +35,14 @@ export async function runKit1(
 ): Promise<void> {
   const ids = new RequestIds();
   const gate = new ApprovalGate({ autoApprove: options.autoApprove });
+  const analyst = createAnalyst({
+    ...(options.forceHeuristicAnalyst ? { forceHeuristic: true } : {}),
+    ...(client.config.anthropicApiKey ? { apiKey: client.config.anthropicApiKey } : {}),
+    model: client.config.anthropicModel,
+  });
   const executedObligationIds: string[] = [];
   const approvedObligationIds: string[] = [];
+  const ledger: { action: string; entry: string }[] = [];
   let forecast = { ...TREASURY_FORECAST };
 
   client.seedMockBalances({ USD: 14_200, EUR: 1_150, GBP: 400 });
@@ -42,6 +51,7 @@ export async function runKit1(
   logger.info(
     'Goal: fund what keeps the business running, preserve the reserve floor, and escalate what policy forbids.',
   );
+  logger.detail('Analyst', `${analyst.kind} — reads unstructured text; policy code owns every number`);
 
   const usdValue = await readUsdValues(client);
   let balances = await readBalances(client);
@@ -79,6 +89,10 @@ export async function runKit1(
     await simulateTransferTransition(client, transfer.id, { nextStatus: 'SENT' });
     const paid = await simulateTransferTransition(client, transfer.id, { nextStatus: 'PAID' });
     logger.detail('Transfer settled', `${paid.id} (${paid.status}) ${formatAmount(shipping.amount, shipping.currency)}`);
+    ledger.push({
+      action: 'PAID',
+      entry: `${shipping.counterparty} · ${formatAmount(shipping.amount, shipping.currency)} · LOCAL transfer ${paid.id}`,
+    });
     executedObligationIds.push(shipping.id);
   });
 
@@ -86,12 +100,33 @@ export async function runKit1(
 
   logger.chapter('New information: a customer email contradicts the receipt forecast');
   logger.info(`Email from ${CONTRADICTING_EMAIL.from}: "${CONTRADICTING_EMAIL.body}"`);
+
+  const assessment = await analyst.assessForecast({
+    forecast: {
+      payer: TREASURY_FORECAST.payer,
+      amount: TREASURY_FORECAST.amount,
+      currency: TREASURY_FORECAST.currency,
+      expectedInHours: TREASURY_FORECAST.expectedInHours,
+      confidence: TREASURY_FORECAST.confidence,
+      evidence: TREASURY_FORECAST.evidence,
+    },
+    newInformation: CONTRADICTING_EMAIL.body,
+    source: CONTRADICTING_EMAIL.from,
+  });
+  logger.detail('Analyst reading', `${assessment.direction} — confidence ${assessment.confidence}`);
+  logger.info(assessment.rationale);
+  if (assessment.citedEvidence.length > 0) {
+    logger.detail('Cited evidence', assessment.citedEvidence.join(' | '));
+  }
   forecast = {
     ...forecast,
-    confidence: 0.42,
+    confidence: assessment.confidence,
     contradictingEvidence: CONTRADICTING_EMAIL.body,
   };
   logger.detail('Forecast confidence', `${TREASURY_FORECAST.confidence} -> ${forecast.confidence}`);
+  logger.info(
+    'Only judgment came from the analyst; the confidence tiers, floor and amounts stay in policy code.',
+  );
   logger.detail(
     'Autonomous limit',
     `USD ${TREASURY_POLICY.commitmentLimitUsd(TREASURY_FORECAST.confidence)} -> USD ${TREASURY_POLICY.commitmentLimitUsd(forecast.confidence)}`,
@@ -186,6 +221,10 @@ export async function runKit1(
         `${conversion.conversionId} ${conversion.status} — sold ${formatAmount(conversion.sellAmount, 'USD')} for ${formatAmount(conversion.buyAmount, 'EUR')} at ${conversion.rate}`,
       );
       logger.decision('FX', 'FX calls carry no x-api-version header; the quote is booked exactly once');
+      ledger.push({
+        action: 'CONVERTED',
+        entry: `${formatAmount(conversion.sellAmount, 'USD')} -> ${formatAmount(conversion.buyAmount, 'EUR')} at ${conversion.rate} · quote ${quote.id} booked once`,
+      });
     });
 
     await logger.step(`Pay ${parts.counterparty} with the converted funds`, async () => {
@@ -206,6 +245,10 @@ export async function runKit1(
         'Transfer settled',
         `${paid.id} (${paid.status}) ${formatAmount(parts.amount, parts.currency)} + EUR 12.85 SWIFT fee`,
       );
+      ledger.push({
+        action: 'PAID',
+        entry: `${parts.counterparty} · ${formatAmount(parts.amount, parts.currency)} + EUR 12.85 SWIFT · SWIFT transfer ${paid.id}`,
+      });
       executedObligationIds.push(parts.id);
     });
   }
@@ -228,10 +271,36 @@ export async function runKit1(
   for (const action of plan3.actions) {
     if (action.kind === 'DEFER') {
       logger.detail('Deferred', `${action.obligation.counterparty} — ${action.reason}`);
+      ledger.push({
+        action: 'DEFERRED',
+        entry: `${action.obligation.counterparty} · ${formatAmount(action.obligation.amount, action.obligation.currency)} · ${action.reason}`,
+      });
     }
     if (action.kind === 'ESCALATE') {
       logger.detail('Escalated', `${action.obligation.counterparty} — ${action.reason}`);
+      ledger.push({
+        action: 'ESCALATED',
+        entry: `${action.obligation.counterparty} · ${formatAmount(action.obligation.amount, action.obligation.currency)} · ${action.reason}`,
+      });
     }
+  }
+
+  const helios = plan3.actions.find(
+    (action) => action.kind === 'ESCALATE' && action.obligation.id === 'obl-helios',
+  );
+  if (helios && helios.kind === 'ESCALATE') {
+    const note = await analyst.explainException({
+      counterparty: helios.obligation.counterparty,
+      amount: helios.obligation.amount,
+      currency: helios.obligation.currency,
+      reason: helios.reason,
+    });
+    logger.detail('Escalation note', note);
+  }
+
+  logger.chapter('Decision ledger');
+  for (const row of ledger) {
+    logger.detail(row.action, row.entry);
   }
   logger.info(
     'Executed: Meridian Freight (USD 4,200) and Steinmetz Komponenten (EUR 5,400 + fee) under the recorded approval; Lowly Software and Anker Strategy stay deferred; Helios Advisory awaits vendor onboarding.',
