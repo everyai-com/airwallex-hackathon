@@ -1,0 +1,28 @@
+{
+  "name": "airwallex-hackathon",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "setup": "tsx src/cli.ts setup",
+    "kit1": "tsx src/cli.ts kit1",
+    "kit2": "tsx src/cli.ts kit2",
+    "kit3": "tsx src/cli.ts kit3",
+    "kit4": "tsx src/cli.ts kit4",
+    "kit5": "tsx src/cli.ts kit5",
+    "kit6": "tsx src/cli.ts kit6",
+    "kit7": "tsx src/cli.ts kit7",
+    "kit8": "tsx src/cli.ts kit8",
+    "all": "tsx src/cli.ts all",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.5.0"
+  }
+}
