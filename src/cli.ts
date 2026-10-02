@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import { loadConfig, requireCredentials, type Config } from './config.js';
 import { AirwallexClient } from './core/client.js';
 import { isAirwallexError } from './core/errors.js';
+import { RequestIds } from './core/ids.js';
 import { createLogger } from './core/log.js';
 import { runKit1 } from './kits/kit1-treasury/index.js';
 import { runKit2 } from './kits/kit2-purchase/index.js';
@@ -34,6 +36,7 @@ and Client ID. In mock mode they run without any credentials.
 Flags:
   --mock                       Use the in-memory sandbox simulator (no credentials)
   --live                       Force real sandbox calls even if MOCK is set
+  --fresh                      Rotate persisted request ids (live) so new payments are created
   --no-auto-approve            Require an interactive prompt for approvals
   --heuristic                  Force the deterministic analyst (no Claude call)
   --deposit=<amount>           Setup deposit in major units (default 13000)
@@ -53,6 +56,14 @@ async function main(): Promise<void> {
 
   if (!config.mock) {
     requireCredentials(config);
+    if (args.includes('--fresh')) {
+      RequestIds.clear(join(config.dataDir, 'request-ids.json'));
+      logger.info('Fresh run: persisted request ids rotated, so new payments will be created.');
+    } else {
+      logger.info(
+        'Request ids persist under .data/ — a re-run resumes instead of re-paying. Use --fresh to rotate them.',
+      );
+    }
   } else {
     logger.info('MOCK mode: every call runs against the in-memory sandbox simulator.');
   }

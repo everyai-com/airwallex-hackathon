@@ -8,7 +8,6 @@ import {
   waitForCardholderReady,
 } from '../../api/issuing.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount, round2 } from '../../core/money.js';
 import { PURCHASE_POLICY, chooseOption } from './policy.js';
@@ -21,7 +20,7 @@ import {
 } from './terms.js';
 
 export async function runKit2(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   client.seedMockBalances({ USD: 14_200 });
 
   logger.chapter('Intent-Bound Purchase Agent — annual vs monthly, enforced by card controls');

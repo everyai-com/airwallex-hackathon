@@ -15,7 +15,7 @@ export interface TransferRecord {
   feeAmount?: number;
 }
 
-function toTransfer(item: unknown): TransferRecord {
+export function toTransfer(item: unknown): TransferRecord {
   const record = asRecord(item);
   return {
     id: String(record.id ?? ''),
@@ -53,8 +53,9 @@ function shouldLookUpOutcome(error: unknown): boolean {
 
 /**
  * Create a transfer. Any non-success response is treated as ambiguous: before
- * reporting failure we look the transfer up by request_id, so a retry can never
- * create a second payment.
+ * reporting failure we look the transfer up by request_id, so a retry — even
+ * from a previous process with a persisted request id — can never create a
+ * second payment.
  */
 export async function createTransfer(
   client: AirwallexClient,
@@ -111,11 +112,70 @@ export async function getTransfer(
   return toTransfer(response);
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Drive a transfer to PAID through the sandbox simulator. Resumable: a transfer
+ * that is already PAID (for example from an earlier run with a persisted
+ * request id) is returned untouched instead of being simulated again.
+ */
+export async function advanceTransferToPaid(
+  client: AirwallexClient,
+  transfer: TransferRecord,
+  options: { onBehalfOf?: string } = {},
+): Promise<TransferRecord> {
+  let current = transfer;
+  if (current.status === 'PAID') return current;
+  if (current.status === 'CANCELLED' || current.status === 'FAILED') {
+    throw new Error(
+      `Transfer ${current.id} is ${current.status} (${current.failureType ?? 'no failure_type'}); it cannot be advanced to PAID.`,
+    );
+  }
+
+  if (current.status === 'PROCESSING') {
+    current = await simulateTransferTransition(client, current.id, {
+      nextStatus: 'SENT',
+      ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
+    });
+  }
+  if (current.status === 'SENT' || current.status === 'FAILED') {
+    current = await simulateTransferTransition(client, current.id, {
+      nextStatus: 'PAID',
+      ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
+    });
+  }
+  return current;
+}
+
+/**
+ * Poll until the transfer reaches a terminal status. SENT is never final, and
+ * a failed transfer can appear as FAILED before it settles as CANCELLED — both
+ * are terminal for decision purposes.
+ */
+export async function waitForTerminalTransfer(
+  client: AirwallexClient,
+  transferId: string,
+  options: { onBehalfOf?: string; attempts?: number } = {},
+): Promise<TransferRecord> {
+  const attempts = options.attempts ?? 6;
+  let current = await getTransfer(client, transferId, options);
+  for (let attempt = 0; attempt < attempts && !isTerminalTransferStatus(current.status); attempt += 1) {
+    await sleep(500);
+    current = await getTransfer(client, transferId, options);
+  }
+  return current;
+}
+
+export function isTerminalTransferStatus(status: string): boolean {
+  return ['PAID', 'CANCELLED', 'FAILED'].includes(status);
+}
+
 export type TransferNextStatus = 'PROCESSING' | 'SENT' | 'PAID' | 'FAILED' | 'CANCELLED' | 'OVERDUE';
 
 /**
- * Sandbox only. A FAILED transition ends with status CANCELLED plus the chosen
- * failure_type; failure_type applies only after the transfer reaches SENT.
+ * Sandbox only. A FAILED transition carries the chosen failure_type; the live
+ * lifecycle may report FAILED transiently and then settle as CANCELLED, so
+ * always branch on both statuses and read failure_type.
  * Transfers created on behalf of a connected account stay in PROCESSING until
  * you advance them here.
  */

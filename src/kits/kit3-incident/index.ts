@@ -1,8 +1,13 @@
 import { getBalances, balanceOf } from '../../api/balances.js';
 import { createBeneficiary, getBeneficiarySchema, usLocalBeneficiary } from '../../api/beneficiaries.js';
-import { createTransfer, getTransfer, simulateTransferTransition } from '../../api/transfers.js';
+import {
+  advanceTransferToPaid,
+  createTransfer,
+  getTransfer,
+  simulateTransferTransition,
+  waitForTerminalTransfer,
+} from '../../api/transfers.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount } from '../../core/money.js';
 import { TRANSFER_REASONS } from '../shared.js';
@@ -11,7 +16,7 @@ import { DuplicatePaymentGuard, decideIncident, isTerminal } from './state.js';
 const DEADLINE_HOURS_REMAINING = 8;
 
 export async function runKit3(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   const guard = new DuplicatePaymentGuard();
   const incidentKey = 'PO-8842-cascade';
   client.seedMockBalances({ USD: 14_200 });
@@ -92,7 +97,11 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
     failureType: 'BENEFICIARY_BANK_RETURNED',
   });
   guard.updateStatus(incidentKey, original.id, 'CANCELLED');
-  logger.detail('Original outcome', `${failed.status} failure_type ${failed.failureType}`);
+  logger.detail('Transition response', `${failed.status} failure_type ${failed.failureType ?? '-'}`);
+  // The sandbox may report FAILED transiently before it settles as CANCELLED;
+  // poll until the transfer is terminal before deciding.
+  const settled = await waitForTerminalTransfer(client, original.id);
+  logger.detail('Original outcome', `${settled.status} failure_type ${settled.failureType ?? '-'}`);
   logger.info(
     'CANCELLED does not mean a person cancelled it — the bank returned the payment. failure_type drives the next decision.',
   );
@@ -100,7 +109,7 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
   const currentBalances = await getBalances(client);
   const lockBeforeReplace = guard.canCreatePayment(incidentKey);
   const decision = decideIncident({
-    transfer: failed,
+    transfer: settled,
     deadlineHoursRemaining: DEADLINE_HOURS_REMAINING,
     availableBalance: balanceOf(currentBalances, 'USD'),
     duplicatePaymentExists: !lockBeforeReplace.allowed,
@@ -108,6 +117,7 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
   logger.chapter('Decision');
   logger.decision(decision.action, decision.reason);
 
+  let replacementExecuted = false;
   if (decision.action === 'REPLACE') {
     await logger.step('Issue a replacement under the duplicate lock, with a NEW request_id', async () => {
       const lock = guard.canCreatePayment(incidentKey);
@@ -132,10 +142,9 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
         status: 'PROCESSING',
       });
 
-      await simulateTransferTransition(client, replacement.id, { nextStatus: 'SENT' });
-      guard.updateStatus(incidentKey, replacement.id, 'SENT');
-      const paid = await simulateTransferTransition(client, replacement.id, { nextStatus: 'PAID' });
+      const paid = await advanceTransferToPaid(client, replacement);
       guard.updateStatus(incidentKey, replacement.id, 'PAID');
+      replacementExecuted = true;
       logger.detail('Replacement settled', `${paid.id} (${paid.status})`);
       logger.detail(
         'Request ids',
@@ -165,13 +174,16 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
   const transfers = await client.request<{ items: unknown[] }>('/api/v1/transfers', {
     method: 'GET',
   });
-  for (const item of transfers.items as Array<Record<string, unknown>>) {
-    if (item.request_id === ids.forOperation('incident-replacement')) {
-      logger.detail('Replacement', `${item.id} status ${item.status}`);
-    }
+  const replacementRecord = (transfers.items as Array<Record<string, unknown>>).find(
+    (item) => item.request_id === ids.forOperation('incident-replacement'),
+  );
+  if (replacementRecord) {
+    logger.detail('Replacement', `${replacementRecord.id} status ${replacementRecord.status}`);
   }
   logger.info(
-    `Final ledger: original ${originalFinal.status} (retryable failure) handled and funds returned; replacement PAID; duplicate lock total for ${incidentKey} is ${guard.totalPaid(incidentKey)} USD-equivalent.`,
+    replacementExecuted
+      ? `Final ledger: original ${originalFinal.status} (retryable failure) handled and funds returned; replacement PAID; duplicate lock total for ${incidentKey} is ${guard.totalPaid(incidentKey)} USD-equivalent.`
+      : `Final ledger: original ${originalFinal.status} handled; no replacement was issued (decision: ${decision.action}); incident stays open for a person.`,
   );
   if (!isTerminal(originalFinal.status)) {
     logger.info('Warning: original has not reached a terminal state — keep the incident open.');

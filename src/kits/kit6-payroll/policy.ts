@@ -22,11 +22,12 @@ export const PAYROLL_POLICY = {
 
 /**
  * Price payroll including one SWIFT fee per EUR payout before converting.
- * Converting only the payroll total makes the last contractor's payout fail.
+ * `usdValue` must give the USD value of one unit of each currency actually held;
+ * an unknown currency makes the assessment refuse rather than guess at 1:1.
  */
 export function assessPayroll(
   contractors: ContractorPayroll[],
-  usdPerEur: number,
+  usdValue: Record<string, number>,
   employerBalance: Record<string, number>,
   policy = PAYROLL_POLICY,
 ): PayrollAssessment {
@@ -35,11 +36,20 @@ export function assessPayroll(
     contractors.filter((item) => item.currency === 'EUR').length * policy.swiftFeeEur,
   );
   const totalRequired = round2(totalPayroll + swiftFees);
-  const requiredUsd = round2(totalRequired * usdPerEur);
+  const payrollCurrency = contractors[0]?.currency ?? 'EUR';
+  const payrollRate = usdValue[payrollCurrency];
+  if (payrollRate === undefined) {
+    throw new Error(`No USD rate supplied for payroll currency ${payrollCurrency}; refusing to assess affordability.`);
+  }
+  const requiredUsd = round2(totalRequired * payrollRate);
 
   const availableUsd = round2(
     Object.entries(employerBalance).reduce((total, [currency, amount]) => {
-      const rate = currency === 'USD' ? 1 : currency === 'EUR' ? usdPerEur : 1;
+      if (amount === 0) return total;
+      const rate = usdValue[currency];
+      if (rate === undefined) {
+        throw new Error(`No USD rate supplied for ${currency} in the employer wallet; refusing to assess affordability.`);
+      }
       return total + amount * rate;
     }, 0),
   );

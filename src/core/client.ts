@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import { requireCredentials, type Config } from '../config.js';
 import { AirwallexError, TransportError } from './errors.js';
 import { liveTransport } from './http.js';
+import { RequestIds } from './ids.js';
 import { MockTransport } from './mock.js';
 import type { ApiRequest, HttpMethod, Transport } from './transport.js';
 
@@ -45,6 +47,15 @@ export class AirwallexClient {
     if (this.transport instanceof MockTransport) {
       this.transport.seed({ balances });
     }
+  }
+
+  /**
+   * Request ids for a kit run. Live runs persist them under .data/ so a
+   * crash-and-rerun resumes instead of re-paying; mock runs stay ephemeral so
+   * every demo starts clean.
+   */
+  requestIds(): RequestIds {
+    return new RequestIds(this.isMock ? undefined : join(this.config.dataDir, 'request-ids.json'));
   }
 
   async login(): Promise<void> {

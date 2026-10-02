@@ -103,7 +103,8 @@ EUR conversion exceeds the autonomous limit and requires a bound human approval 
 receipt lands via a simulated deposit → recalculate (only decisions the new cash changes reopen)
 → one FX conversion (quote booked exactly once, minimum amount, SWIFT fee included) → one supplier
 transfer → reserve confirmed above the floor, followed by a **decision ledger** that shows every
-fund / convert / defer / escalate with its id and reason. The cheapest obligation stays deferred;
+fund / convert / defer / escalate with the transfer id where money moved and the reason in every
+case. The cheapest obligation stays deferred;
 the unsanctioned payee stays escalated with an analyst-written escalation note.
 
 ### Kit 2 — Intent-Bound Purchase Agent (`src/kits/kit2-purchase`)
@@ -153,8 +154,9 @@ attempt from `CHARGEBACK` is caught and shown to fail with
 
 You are the platform issuing cards to small businesses, each a connected account with its own
 wallet. Customer spend draws on the customer's wallet (never the platform's), and one simulated
-authorization shows the ordering rule: a USD 1,500 attempt from a USD 1,000 wallet declines with
-`INSUFFICIENT_FUNDS` **before** the limit check can pass. When two customers are short on the same
+authorization shows the ordering rule: a USD 1,500 attempt from a USD 1,000 wallet passes the
+USD 2,000 limit check and then declines with `INSUFFICIENT_FUNDS` — fund the wallet if you want
+to reach the limit behaviour. When two customers are short on the same
 day, `policy.ts` rations bridge capital against the platform reserve floor — one advance is
 approved (leaving exactly zero capacity), the other is declined with the reason, then Harbor's late
 deposit repays the bridge via `charges/create` and the monthly fee is collected.
@@ -191,7 +193,8 @@ reconciles: payouts + reserves = owed, platform balance = unreleased reserves. A
 src/
   config.ts                 .env loading, base URLs, MOCK switch
   core/
-    client.ts               auth (30-min token), 429 backoff, x-on-behalf-of, files host
+    client.ts               auth (30-min token, refreshed at 25 min), 429 backoff,
+                            persisted request ids, x-on-behalf-of, files host
     http.ts                 live fetch transport          transport.ts  pluggable interface
     mock.ts                 in-memory sandbox simulator (wallets per account, controls, state machines)
     errors.ts               AirwallexError with duplicate/insufficient-funds helpers
@@ -219,8 +222,11 @@ submission/                 enablement email templates + demo script + checklist
 - **Card transactions are read by vocabulary, not status name**: `process_result`,
   `failure_reason` and `transaction_type` — REST and MCP use different status words, and declined
   card transactions end in `FAILED` while failed transfers end in `CANCELLED`.
-- **Retryable vs non-retryable failure types** are separated in code; `CANCELLED` always carries a
-  `failure_type` to read.
+- **Retryable vs non-retryable failure types** are separated in code; a failed transfer reads
+  `CANCELLED` (or transiently `FAILED`) and always carries a `failure_type` to branch on.
+- **Live payments are idempotent across restarts**: request ids persist under `.data/`, so a
+  crash-and-rerun reuses them, the sandbox rejects the duplicate, and the lookup helpers return the
+  original transfer/conversion/intent. `--fresh` rotates them deliberately.
 - **Duplicate locks and tenant isolation live in code**, never in prompts.
 - Sandbox simulation calls sit behind the shared `api/` functions, so the decision logic never
   calls a simulator directly and live calls can replace mock ones one function at a time.
@@ -242,7 +248,8 @@ npm test          # node:test — policy unit tests + all eight kits end to end 
 
 ## Extending
 
-- Replace scenario data in `src/kits/*/scenario.ts` / `cases.ts` with your own synthetic story.
+- Replace scenario data in the kit sources (`kit1-treasury/scenario.ts`, `kit4-dispute/cases.ts`,
+  and the scenario constants at the top of the other kits' `index.ts` / `policy.ts`).
 - Swap the mock transport for live by removing `MOCK` (or pass `--live`).
 - Add a kit by copying the `policy.ts` + `planner.ts` split: keep money math pure and testable,
   keep approvals bound, and let only the `index.ts` orchestrator make API calls.

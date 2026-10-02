@@ -8,11 +8,10 @@ import {
 } from '../../api/beneficiaries.js';
 import { createFxConversion, createFxQuote, getFxRate } from '../../api/fx.js';
 import { ensureGlobalAccount, simulateDeposit } from '../../api/global-accounts.js';
-import { createTransfer, simulateTransferTransition } from '../../api/transfers.js';
+import { createTransfer, advanceTransferToPaid } from '../../api/transfers.js';
 import { createAnalyst } from '../../core/analyst.js';
-import { ApprovalGate } from '../../core/approvals.js';
+import { ApprovalGate, type Approval } from '../../core/approvals.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount, round2, roundTo } from '../../core/money.js';
 import { TRANSFER_REASONS } from '../shared.js';
@@ -33,7 +32,7 @@ export async function runKit1(
   logger: Logger,
   options: Kit1Options = {},
 ): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   const gate = new ApprovalGate({ autoApprove: options.autoApprove });
   const analyst = createAnalyst({
     ...(options.forceHeuristicAnalyst ? { forceHeuristic: true } : {}),
@@ -43,6 +42,7 @@ export async function runKit1(
   const executedObligationIds: string[] = [];
   const approvedObligationIds: string[] = [];
   const ledger: { action: string; entry: string }[] = [];
+  let partsApproval: Approval | undefined;
   let forecast = { ...TREASURY_FORECAST };
 
   client.seedMockBalances({ USD: 14_200, EUR: 1_150, GBP: 400 });
@@ -86,9 +86,11 @@ export async function runKit1(
       beneficiaryId,
     });
     logger.detail('Transfer created', `${transfer.id} (${transfer.status})`);
-    await simulateTransferTransition(client, transfer.id, { nextStatus: 'SENT' });
-    const paid = await simulateTransferTransition(client, transfer.id, { nextStatus: 'PAID' });
-    logger.detail('Transfer settled', `${paid.id} (${paid.status}) ${formatAmount(shipping.amount, shipping.currency)}`);
+    const paid = await advanceTransferToPaid(client, transfer);
+    logger.detail(
+      'Transfer settled',
+      `${paid.id} (${paid.status}) ${formatAmount(shipping.amount, shipping.currency)}${transfer.status === 'PAID' ? ' — already settled by a previous run, not re-paid' : ''}`,
+    );
     ledger.push({
       action: 'PAID',
       entry: `${shipping.counterparty} · ${formatAmount(shipping.amount, shipping.currency)} · LOCAL transfer ${paid.id}`,
@@ -165,8 +167,12 @@ export async function runKit1(
     logger.detail('Operation', parts.counterparty);
     logger.detail('Bound amount', `${approval.request.amount} ${approval.request.currency}`);
     logger.detail('Approved by', approval.approver);
-    if (approval.approved) approvedObligationIds.push(parts.id);
-    else logger.info('Approval declined — the conversion stays parked for a person to revisit.');
+    if (approval.approved) {
+      approvedObligationIds.push(parts.id);
+      partsApproval = approval;
+    } else {
+      logger.info('Approval declined — the conversion stays parked for a person to revisit.');
+    }
   }
 
   const depositUsd = options.depositUsd ?? TREASURY_FORECAST.amount;
@@ -198,11 +204,26 @@ export async function runKit1(
   const convertAction = plan3.actions.find(
     (action) => action.kind === 'CONVERT_AND_FUND' && action.obligation.id === 'obl-parts',
   );
-  if (convertAction && convertAction.kind === 'CONVERT_AND_FUND') {
+
+  // An approval binds to what the approver saw. Re-check the executable tuple
+  // before moving money; if anything material changed, stop and re-ask.
+  const approvalMatches =
+    !partsApproval ||
+    (Math.abs(partsApproval.request.amount - (convertAction?.kind === 'CONVERT_AND_FUND' ? convertAction.convertAmount : Number.NaN)) <= 0.01 &&
+      partsApproval.request.currency === (convertAction?.kind === 'CONVERT_AND_FUND' ? convertAction.buyCurrency : undefined) &&
+      partsApproval.request.counterparty === convertAction?.obligation.counterparty);
+  if (!approvalMatches) {
+    logger.decision(
+      'ABORT',
+      `Execution no longer matches the approval (${partsApproval!.request.amount} ${partsApproval!.request.currency} for ${partsApproval!.request.counterparty}) — re-approval required before moving money.`,
+    );
+  }
+
+  if (convertAction && convertAction.kind === 'CONVERT_AND_FUND' && approvalMatches) {
     const parts = convertAction.obligation;
     await logger.step(`Convert the minimum: USD -> EUR ${convertAction.convertAmount}`, async () => {
       const quote = await createFxQuote(client, {
-        requestId: ids.forOperation('obl-parts-quote'),
+        requestId: ids.fresh(),
         sellCurrency: convertAction.sellCurrency,
         buyCurrency: convertAction.buyCurrency,
         buyAmount: convertAction.convertAmount,
@@ -239,11 +260,10 @@ export async function runKit1(
         beneficiaryId,
       });
       logger.detail('Transfer created', `${transfer.id} (${transfer.status})`);
-      await simulateTransferTransition(client, transfer.id, { nextStatus: 'SENT' });
-      const paid = await simulateTransferTransition(client, transfer.id, { nextStatus: 'PAID' });
+      const paid = await advanceTransferToPaid(client, transfer);
       logger.detail(
         'Transfer settled',
-        `${paid.id} (${paid.status}) ${formatAmount(parts.amount, parts.currency)} + EUR 12.85 SWIFT fee`,
+        `${paid.id} (${paid.status}) ${formatAmount(parts.amount, parts.currency)} + EUR 12.85 SWIFT fee${transfer.status === 'PAID' ? ' — already settled by a previous run, not re-paid' : ''}`,
       );
       ledger.push({
         action: 'PAID',
@@ -263,7 +283,7 @@ export async function runKit1(
 
   logger.chapter('Outcome');
   logger.detail('Final wallet', formatWallet(finalBalances));
-  logger.detail('Reserve (USD equivalent)', `USD ${reserveUsd}`);
+  logger.detail('Reserve (USD equivalent, mid rates)', `USD ${reserveUsd}`);
   logger.detail(
     'Reserve floor',
     `USD ${TREASURY_POLICY.reserveFloorUsd} — ${reserveUsd >= TREASURY_POLICY.reserveFloorUsd ? 'maintained' : 'BELOW FLOOR'}`,
@@ -302,8 +322,17 @@ export async function runKit1(
   for (const row of ledger) {
     logger.detail(row.action, row.entry);
   }
+  const executedNames = TREASURY_OBLIGATIONS.filter((item) =>
+    executedObligationIds.includes(item.id),
+  ).map((item) => item.counterparty);
+  const deferredNames = plan3.actions
+    .filter((action) => action.kind === 'DEFER')
+    .map((action) => action.obligation.counterparty);
+  const escalatedNames = plan3.actions
+    .filter((action) => action.kind === 'ESCALATE')
+    .map((action) => action.obligation.counterparty);
   logger.info(
-    'Executed: Meridian Freight (USD 4,200) and Steinmetz Komponenten (EUR 5,400 + fee) under the recorded approval; Lowly Software and Anker Strategy stay deferred; Helios Advisory awaits vendor onboarding.',
+    `Executed: ${executedNames.join(' and ') || 'nothing'}. Deferred: ${deferredNames.join(', ') || 'none'}. Escalated: ${escalatedNames.join(', ') || 'none'}.`,
   );
 }
 

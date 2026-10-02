@@ -10,6 +10,7 @@ import { assessPayroll, crossTenantGuard } from '../src/kits/kit6-payroll/policy
 import { runKit7 } from '../src/kits/kit7-lending/index.js';
 import { planDisbursement, repaymentDue } from '../src/kits/kit7-lending/policy.js';
 import { runKit8 } from '../src/kits/kit8-marketplace/index.js';
+import { MockTransport, type MockSnapshot } from '../src/core/mock.js';
 import {
   planSettlement,
   recomputeOnEvidence,
@@ -17,6 +18,12 @@ import {
 } from '../src/kits/kit8-marketplace/policy.js';
 
 const logger = createLogger({ silent: true });
+
+function mockSnapshot(client: AirwallexClient): MockSnapshot {
+  const transport = client.transport;
+  assert.ok(transport instanceof MockTransport, 'expected the mock transport');
+  return transport.snapshot();
+}
 
 function testConfig(): Config {
   return {
@@ -48,8 +55,19 @@ test('kit5 rationes bridge capital against the reserve floor', () => {
   assert.equal(plan.capacityUsd, 0);
 });
 
-test('kit5 runs end to end against the mock sandbox', async () => {
-  await runKit5(testClient(), logger);
+test('kit5 advances exactly one bridge and collects the recovery plus fee', async () => {
+  const client = testClient();
+  await runKit5(client, logger);
+  const snapshot = mockSnapshot(client);
+  const bridges = snapshot.moneyMoves.filter((move) => String(move.id).startsWith('cat_'));
+  const charges = snapshot.moneyMoves.filter((move) => String(move.id).startsWith('chg_'));
+  assert.equal(bridges.length, 1);
+  assert.equal(Number(bridges[0]!.amount), 2_200);
+  assert.equal(String(bridges[0]!.status), 'SETTLED');
+  assert.deepEqual(
+    charges.map((charge) => Number(charge.amount)).sort((a, b) => a - b),
+    [49, 2_200],
+  );
 });
 
 // --- Kit 6: payroll pricing and isolation ------------------------------------
@@ -60,7 +78,7 @@ test('kit6 prices SWIFT fees into the conversion and blocks cross-tenant funding
       { name: 'One', amount: 3_400, currency: 'EUR' },
       { name: 'Two', amount: 2_600, currency: 'EUR' },
     ],
-    1.09,
+    { USD: 1, EUR: 1.09 },
     { USD: 20_000 },
   );
   assert.equal(assessment.totalPayroll, 6_000);
@@ -70,16 +88,31 @@ test('kit6 prices SWIFT fees into the conversion and blocks cross-tenant funding
 
   const short = assessPayroll(
     [{ name: 'One', amount: 6_000, currency: 'EUR' }],
-    1.09,
+    { USD: 1, EUR: 1.09 },
     { USD: 5_000 },
   );
   assert.equal(short.canRun, false);
   assert.ok(short.shortfallUsd > 0);
   assert.match(crossTenantGuard('B', 'C'), /tenant-scoped/);
+  assert.throws(
+    () => assessPayroll([{ name: 'One', amount: 100, currency: 'EUR' }], { USD: 1 }, { GBP: 50 }),
+    /No USD rate supplied/,
+  );
 });
 
-test('kit6 runs end to end against the mock sandbox', async () => {
-  await runKit6(testClient(), logger);
+test('kit6 pays only the funded employer, never across tenants', async () => {
+  const client = testClient();
+  await runKit6(client, logger);
+  const snapshot = mockSnapshot(client);
+  const euroPayments = snapshot.transfers.filter(
+    (transfer) => transfer.transfer_currency === 'EUR' && transfer.status === 'PAID',
+  );
+  assert.equal(euroPayments.length, 2, 'Acme pays two contractors; Borealis stays blocked');
+  assert.equal(snapshot.conversions.length, 1);
+  assert.equal(
+    snapshot.moneyMoves.filter((move) => String(move.id).startsWith('chg_')).length,
+    2,
+  );
 });
 
 // --- Kit 7: disbursement sizing ----------------------------------------------
@@ -100,8 +133,15 @@ test('kit7 sizes tranches against the floor and re-decides with less cash', () =
   assert.equal(repaymentDue(4_000), 320);
 });
 
-test('kit7 runs end to end against the mock sandbox', async () => {
-  await runKit7(testClient(), logger);
+test('kit7 collects the actual repayments and disburses the smaller tranche', async () => {
+  const client = testClient();
+  await runKit7(client, logger);
+  const snapshot = mockSnapshot(client);
+  const charges = snapshot.moneyMoves.filter((move) => String(move.id).startsWith('chg_'));
+  assert.deepEqual(charges.map((charge) => Number(charge.amount)).sort((a, b) => a - b), [320, 960]);
+  const disbursement = snapshot.moneyMoves.find((move) => String(move.id).startsWith('cat_'));
+  assert.equal(Number(disbursement?.amount), 7_480);
+  assert.equal(snapshot.balances.USD, 20_000, 'ends exactly on the portfolio floor');
 });
 
 // --- Kit 8: reserves and settlement ------------------------------------------
@@ -123,6 +163,17 @@ test('kit8 reserves the highest rate for the newest seller and recomputes only i
   assert.equal(revised.find((item) => item.sellerId === 'a')!.payoutUsd, 11_760);
 });
 
-test('kit8 runs end to end against the mock sandbox', async () => {
-  await runKit8(testClient(), logger);
+test('kit8 pays all three sellers net of reserve and reconciles the wallet', async () => {
+  const client = testClient();
+  await runKit8(client, logger);
+  const snapshot = mockSnapshot(client);
+  const payouts = snapshot.moneyMoves
+    .filter((move) => String(move.id).startsWith('cat_'))
+    .map((move) => Number(move.amount))
+    .sort((a, b) => a - b);
+  assert.deepEqual(payouts, [6_750, 8_550, 11_760]);
+  const recoveries = snapshot.moneyMoves.filter((move) => String(move.id).startsWith('chg_'));
+  assert.equal(recoveries.length, 1);
+  assert.equal(Number(recoveries[0]!.amount), 1_600);
+  assert.equal(snapshot.balances.USD, 4_540, 'reserves 2,940 + refund coverage 1,600');
 });

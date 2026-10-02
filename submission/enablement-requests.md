@@ -7,8 +7,8 @@ Airwallex can grant — so this file contains the exact asks.
 **Fastest path:** fill `submission/.env.applications` (copy the example) and run
 `node submission/send-applications.mjs`. It opens each email as a **draft** in your
 mail client; you review and hit send. Nothing is sent automatically. Use
-`--all` to open the five individual emails instead of the consolidated one, or
-`--print` to just print them.
+`--all` to open the consolidated email plus the four individual ones (five drafts
+in total), or `--print` to just print them.
 
 Recipient for all of them: **devhelp@airwallex.com** (the hackathon support address).
 Also ask the hackathon organisers on the kickoff / community channels for the

@@ -1,4 +1,5 @@
 import type { AirwallexClient } from '../core/client.js';
+import { isAirwallexError, TransportError } from '../core/errors.js';
 import { num, str } from '../core/parse.js';
 
 export interface FxQuote {
@@ -68,9 +69,44 @@ export async function createFxQuote(
   return { id, rate, ...(str(response.currency_pair) ? { currencyPair: str(response.currency_pair) } : {}) };
 }
 
+function toConversion(response: Record<string, unknown>, fallback: {
+  buyCurrency: string;
+  sellCurrency: string;
+}): FxConversion {
+  return {
+    conversionId: String(response.conversion_id ?? ''),
+    status: String(response.status ?? ''),
+    rate: num(response.client_rate, response.rate) ?? 0,
+    buyAmount: num(response.buy_amount) ?? 0,
+    sellAmount: num(response.sell_amount) ?? 0,
+    buyCurrency: String(response.buy_currency ?? fallback.buyCurrency),
+    sellCurrency: String(response.sell_currency ?? fallback.sellCurrency),
+  };
+}
+
+export async function findConversionByRequestId(
+  client: AirwallexClient,
+  requestId: string,
+): Promise<FxConversion | undefined> {
+  const response = await client.request<{ items: Record<string, unknown>[] }>(
+    '/api/v1/fx/conversions',
+    { method: 'GET', query: { request_id: requestId } },
+  );
+  const first = (response.items ?? [])[0];
+  return first
+    ? toConversion(first, {
+        buyCurrency: String(first.buy_currency ?? ''),
+        sellCurrency: String(first.sell_currency ?? ''),
+      })
+    : undefined;
+}
+
 /**
  * POST /fx/conversions/create — REST only, no MCP tool exists.
  * Never send x-api-version on FX calls; this client never sets it.
+ * Any non-success response is treated as ambiguous: the conversion is looked up
+ * by request_id before reporting failure, so a retried or resumed run converts
+ * exactly once.
  */
 export async function createFxConversion(
   client: AirwallexClient,
@@ -84,24 +120,28 @@ export async function createFxConversion(
     onBehalfOf?: string;
   },
 ): Promise<FxConversion> {
-  const response = await client.request<Record<string, unknown>>('/api/v1/fx/conversions/create', {
-    body: {
-      request_id: input.requestId,
-      sell_currency: input.sellCurrency,
-      buy_currency: input.buyCurrency,
-      ...(input.buyAmount !== undefined ? { buy_amount: String(input.buyAmount) } : {}),
-      ...(input.sellAmount !== undefined ? { sell_amount: String(input.sellAmount) } : {}),
-      ...(input.quoteId ? { quote_id: input.quoteId } : {}),
-    },
-    ...(input.onBehalfOf ? { onBehalfOf: input.onBehalfOf } : {}),
-  });
-  return {
-    conversionId: String(response.conversion_id ?? ''),
-    status: String(response.status ?? ''),
-    rate: num(response.client_rate, response.rate) ?? 0,
-    buyAmount: num(response.buy_amount) ?? 0,
-    sellAmount: num(response.sell_amount) ?? 0,
-    buyCurrency: String(response.buy_currency ?? input.buyCurrency),
-    sellCurrency: String(response.sell_currency ?? input.sellCurrency),
-  };
+  try {
+    const response = await client.request<Record<string, unknown>>('/api/v1/fx/conversions/create', {
+      body: {
+        request_id: input.requestId,
+        sell_currency: input.sellCurrency,
+        buy_currency: input.buyCurrency,
+        ...(input.buyAmount !== undefined ? { buy_amount: String(input.buyAmount) } : {}),
+        ...(input.sellAmount !== undefined ? { sell_amount: String(input.sellAmount) } : {}),
+        ...(input.quoteId ? { quote_id: input.quoteId } : {}),
+      },
+      ...(input.onBehalfOf ? { onBehalfOf: input.onBehalfOf } : {}),
+    });
+    return toConversion(response, input);
+  } catch (error) {
+    const ambiguous =
+      error instanceof TransportError ||
+      (isAirwallexError(error) &&
+        (error.isDuplicateRequestId || error.status >= 500 || error.code === 'request_pending'));
+    if (ambiguous) {
+      const existing = await findConversionByRequestId(client, input.requestId);
+      if (existing) return existing;
+    }
+    throw error;
+  }
 }

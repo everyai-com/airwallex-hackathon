@@ -1,15 +1,20 @@
 import { getBalances, balanceOf } from '../../api/balances.js';
 import { createBeneficiary, euSwiftBeneficiary } from '../../api/beneficiaries.js';
-import { createFxConversion, createFxQuote, getFxRate } from '../../api/fx.js';
+import { createFxConversion, createFxQuote, type FxQuote } from '../../api/fx.js';
 import { collectCharge, PLATFORM_REASONS } from '../../api/platform.js';
-import { createTransfer, simulateTransferTransition } from '../../api/transfers.js';
+import { advanceTransferToPaid, createTransfer } from '../../api/transfers.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount, round2, roundTo } from '../../core/money.js';
 import { TRANSFER_REASONS } from '../shared.js';
 import { PLATFORM_ON_BEHALF_NOTE, fundCustomerWallet, openConnectedAccount } from '../platform-shared.js';
-import { assessPayroll, crossTenantGuard, PAYROLL_POLICY, type ContractorPayroll } from './policy.js';
+import {
+  assessPayroll,
+  crossTenantGuard,
+  PAYROLL_POLICY,
+  type ContractorPayroll,
+  type PayrollAssessment,
+} from './policy.js';
 
 const CONTRACTORS: Record<string, ContractorPayroll[]> = {
   acme: [
@@ -20,7 +25,7 @@ const CONTRACTORS: Record<string, ContractorPayroll[]> = {
 };
 
 export async function runKit6(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   client.seedMockBalances({ USD: 14_200 });
 
   logger.chapter('Multi-Employer Payroll Executor — tenant-isolated payouts, priced with fees');
@@ -62,39 +67,51 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
   });
 
   const acmeAccount = accountIds.get('acme')!;
-  const rate = await getFxRate(client, {
-    sellCurrency: 'USD',
-    buyCurrency: 'EUR',
-    onBehalfOf: acmeAccount,
-  });
-  const usdPerEur = roundTo(1 / rate, 6);
-  logger.detail('USD -> EUR rate', `1 EUR = USD ${usdPerEur} (fetched on Acme's behalf)`);
 
-  await logger.step("Price Acme's payroll including one SWIFT fee per payout", async () => {
-    const assessment = assessPayroll(CONTRACTORS.acme!, usdPerEur, { USD: 20_000 });
-    logger.detail('Payroll', `EUR ${assessment.totalPayroll} + EUR ${assessment.swiftFees} SWIFT fees`);
-    logger.detail('Convert to pay', `EUR ${assessment.totalRequired} (about USD ${assessment.requiredUsd})`);
+  let acmeQuote: FxQuote | undefined;
+  let acmeAssessment: PayrollAssessment | undefined;
+  await logger.step("Price Acme's payroll with the rate Acme will actually trade at", async () => {
+    const payrollTotal = round2(
+      CONTRACTORS.acme!.reduce((total, item) => total + item.amount, 0) +
+        CONTRACTORS.acme!.length * PAYROLL_POLICY.swiftFeeEur,
+    );
+    acmeQuote = await createFxQuote(client, {
+      requestId: ids.fresh(),
+      sellCurrency: 'USD',
+      buyCurrency: 'EUR',
+      buyAmount: payrollTotal,
+      onBehalfOf: acmeAccount,
+    });
+    acmeAssessment = assessPayroll(
+      CONTRACTORS.acme!,
+      { USD: 1, EUR: roundTo(1 / acmeQuote.rate, 8) },
+      { USD: 20_000 },
+    );
+    logger.detail(
+      'Quote (execution rate)',
+      `${acmeQuote.id} at ${acmeQuote.rate} — single use, booked by the conversion below`,
+    );
+    logger.detail(
+      'Payroll',
+      `EUR ${acmeAssessment.totalPayroll} + EUR ${acmeAssessment.swiftFees} SWIFT fees`,
+    );
+    logger.detail(
+      'Convert to pay',
+      `EUR ${acmeAssessment.totalRequired} (about USD ${acmeAssessment.requiredUsd})`,
+    );
     logger.decision(
       'PRICE FEES FIRST',
-      'Converting only the payroll total would make the last contractor\'s payout fail on insufficient funds.',
+      "Converting only the payroll total would make the last contractor's payout fail on insufficient funds.",
     );
   });
 
   await logger.step("Convert Acme's payroll on Acme's behalf, then pay both contractors", async () => {
-    const assessment = assessPayroll(CONTRACTORS.acme!, usdPerEur, { USD: 20_000 });
-    const quote = await createFxQuote(client, {
-      requestId: ids.forOperation('acme-quote'),
-      sellCurrency: 'USD',
-      buyCurrency: 'EUR',
-      buyAmount: assessment.totalRequired,
-      onBehalfOf: acmeAccount,
-    });
     const conversion = await createFxConversion(client, {
       requestId: ids.forOperation('acme-conversion'),
       sellCurrency: 'USD',
       buyCurrency: 'EUR',
-      buyAmount: assessment.totalRequired,
-      quoteId: quote.id,
+      buyAmount: acmeAssessment!.totalRequired,
+      quoteId: acmeQuote!.id,
       onBehalfOf: acmeAccount,
     });
     logger.detail(
@@ -129,11 +146,7 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
         beneficiaryId: beneficiary.id,
         onBehalfOf: acmeAccount,
       });
-      await simulateTransferTransition(client, transfer.id, { nextStatus: 'SENT', onBehalfOf: acmeAccount });
-      const paid = await simulateTransferTransition(client, transfer.id, {
-        nextStatus: 'PAID',
-        onBehalfOf: acmeAccount,
-      });
+      const paid = await advanceTransferToPaid(client, transfer, { onBehalfOf: acmeAccount });
       logger.detail(`Paid ${contractor.name}`, `${paid.id} ${paid.status} EUR ${contractor.amount}`);
     }
     logger.info(
@@ -147,7 +160,11 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
   const borealisWallet = Object.fromEntries(
     borealisBalances.map((line) => [line.currency, line.available]),
   );
-  const assessment = assessPayroll(CONTRACTORS.borealis!, usdPerEur, borealisWallet);
+  const assessment = assessPayroll(
+    CONTRACTORS.borealis!,
+    { USD: 1, EUR: roundTo(1 / acmeQuote!.rate, 8) },
+    borealisWallet,
+  );
   logger.detail('Required', `USD ${assessment.requiredUsd} (payroll + SWIFT fee)`);
   logger.detail('Available', `USD ${assessment.availableUsd}`);
   logger.decision('SHORTFALL', `USD ${assessment.shortfallUsd} — do not run this payroll`);

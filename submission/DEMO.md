@@ -76,7 +76,7 @@ Talking points judges love:
 ## 4. Submission checklist
 
 - [ ] `npm run typecheck` clean
-- [ ] `npm test` — 19 passing tests (policy unit tests + all eight kits end to end)
+- [ ] `npm test` — 29 passing tests (policy unit tests, idempotency, and effect assertions on all eight kits)
 - [ ] `npx tsx src/cli.ts all --mock` exits 0
 - [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)

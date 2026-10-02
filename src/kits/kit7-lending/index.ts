@@ -7,7 +7,6 @@ import {
   PLATFORM_REASONS,
 } from '../../api/platform.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { round2 } from '../../core/money.js';
 import {
@@ -18,7 +17,7 @@ import {
 import { LENDING_POLICY, planDisbursement, repaymentDue } from './policy.js';
 
 export async function runKit7(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   client.seedMockBalances({ USD: 14_200 });
 
   logger.chapter('Portfolio Lending Agent — repayments, a reserve floor, and a new advance');

@@ -1,4 +1,4 @@
-import { round2 } from '../../core/money.js';
+import { round2, SWIFT_FEE_EUR } from '../../core/money.js';
 import type { TransferRecord } from '../../api/transfers.js';
 
 export type IncidentAction = 'WAIT' | 'REPLACE' | 'ESCALATE';
@@ -31,7 +31,16 @@ export const NON_RETRYABLE_FAILURE_TYPES = new Set([
 ]);
 
 export function isTerminal(status: string): boolean {
-  return ['PAID', 'CANCELLED'].includes(status);
+  // FAILED can appear transiently before the sandbox settles it as CANCELLED;
+  // both are terminal for decision purposes, PAID is success.
+  return ['PAID', 'CANCELLED', 'FAILED'].includes(status);
+}
+
+/** Cost of funding this payout from the wallet: principal plus any SWIFT fee. */
+export function transferCost(transfer: TransferRecord): number {
+  const fee =
+    transfer.transferMethod === 'SWIFT' && transfer.transferCurrency === 'EUR' ? SWIFT_FEE_EUR : 0;
+  return round2(transfer.transferAmount + fee);
 }
 
 export interface IncidentInput {
@@ -43,9 +52,10 @@ export interface IncidentInput {
 }
 
 /**
- * Decide what happens to a delayed supplier transfer. A CANCELLED transfer is
- * final: it may have been failed by the bank, not by a person, so read
- * failure_type before deciding. SENT is never final.
+ * Decide what happens to a delayed supplier transfer. A failed transfer is
+ * final: the bank may have returned it (CANCELLED with failure_type) or it may
+ * still read FAILED before settling, so read failure_type and never assume a
+ * person cancelled it. SENT is never final.
  */
 export function decideIncident(input: IncidentInput): IncidentDecision {
   const { transfer } = input;
@@ -61,7 +71,7 @@ export function decideIncident(input: IncidentInput): IncidentDecision {
     return { action: 'WAIT', reason: 'Transfer is already PAID; nothing to do.' };
   }
 
-  if (transfer.status !== 'CANCELLED') {
+  if (transfer.status !== 'CANCELLED' && transfer.status !== 'FAILED') {
     return {
       action: 'WAIT',
       reason: `Status ${transfer.status} is still moving; poll until it reaches a terminal state.`,
@@ -97,10 +107,10 @@ export function decideIncident(input: IncidentInput): IncidentDecision {
     };
   }
 
-  if (input.availableBalance < transfer.transferAmount) {
+  if (input.availableBalance < transferCost(transfer)) {
     return {
       action: 'ESCALATE',
-      reason: `Insufficient balance (${input.availableBalance} < ${transfer.transferAmount}) for a full replacement; do not part-pay.`,
+      reason: `Insufficient balance (${input.availableBalance} < ${transferCost(transfer)} including fees) for a full replacement; do not part-pay.`,
     };
   }
 

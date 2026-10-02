@@ -19,8 +19,12 @@ export async function uploadEvidence(
     '/api/v1/files/upload',
     { formData: form, filesHost: true },
   );
+  const fileId = String(response.file_id ?? '');
+  if (!fileId) {
+    throw new Error('files/upload returned no file_id; refusing to submit evidence without it.');
+  }
   return {
-    fileId: String(response.file_id ?? ''),
+    fileId,
     ...(response.filename ? { filename: response.filename } : {}),
   };
 }

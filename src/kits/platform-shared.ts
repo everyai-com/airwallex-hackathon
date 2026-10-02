@@ -15,32 +15,40 @@ export const PLATFORM_ON_BEHALF_NOTE =
 
 /**
  * Create -> update -> submit -> activate a connected account.
- * Ensure business_identifiers carries an EIN before submit; without it, on-behalf
- * transfers fail later (001 when payer is omitted, 048 when supplied).
+ * The documented schema requires business_details.business_name,
+ * business_address/registration_address (address_line1/suburb naming), person
+ * entries with first_name/last_name/roles, and business_identifiers with an EIN
+ * before submit; without the EIN, on-behalf transfers fail later (001 when the
+ * payer is omitted, 048 when supplied).
  */
 export async function openConnectedAccount(
   client: AirwallexClient,
   input: { businessName: string; ein: string; contactName: string; city: string; countryCode: string },
 ): Promise<string> {
+  const [firstName, lastName] = input.contactName.split(' ');
+  const businessAddress = {
+    // Account addresses use address_line1/suburb, not beneficiary field names.
+    country_code: input.countryCode,
+    city: input.city,
+    address_line1: '1 Sandbox Plaza',
+    suburb: input.city,
+    state: 'NY',
+    postcode: '10001',
+  };
   const accountDetails = {
     business_details: {
-      name: input.businessName,
-      address: {
-        // Account addresses use address_line1/suburb, not beneficiary field names.
-        country_code: input.countryCode,
-        city: input.city,
-        address_line1: '1 Sandbox Plaza',
-        suburb: input.city,
-        postcode: '10001',
-        state: 'NY',
+      business_name: input.businessName,
+      business_address: businessAddress,
+      registration_address: businessAddress,
+      business_identifiers: [{ type: 'EIN', country_code: 'US', number: input.ein }],
+    },
+    business_person_details: [
+      {
+        first_name: firstName ?? 'Sandbox',
+        last_name: lastName ?? 'Owner',
+        email: `${input.contactName.toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
+        roles: ['AUTHORISED_PERSON'],
       },
-    },
-    business_person_details: {
-      name: input.contactName,
-      email: `${input.contactName.toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
-    },
-    business_identifiers: [
-      { type: 'EIN', country_code: 'US', number: input.ein },
     ],
   };
 

@@ -1,4 +1,5 @@
 import type { AirwallexClient } from '../core/client.js';
+import { isAirwallexError, TransportError } from '../core/errors.js';
 import { asRecord, num, str } from '../core/parse.js';
 
 export interface PaymentIntent {
@@ -33,6 +34,19 @@ function toPaymentIntent(item: unknown): PaymentIntent {
   };
 }
 
+export async function findPaymentIntentByRequestId(
+  client: AirwallexClient,
+  requestId: string,
+): Promise<PaymentIntent | undefined> {
+  const response = await client.request<{ items: unknown[] }>('/api/v1/pa/payment_intents', {
+    method: 'GET',
+    query: { request_id: requestId },
+  });
+  const first = (response.items ?? [])[0];
+  return first ? toPaymentIntent(first) : undefined;
+}
+
+/** Ambiguous responses are resolved by request_id so a retry never double-charges. */
 export async function createPaymentIntent(
   client: AirwallexClient,
   input: {
@@ -43,16 +57,28 @@ export async function createPaymentIntent(
     descriptor?: string;
   },
 ): Promise<PaymentIntent> {
-  const response = await client.request<unknown>('/api/v1/pa/payment_intents/create', {
-    body: {
-      request_id: input.requestId,
-      amount: input.amount,
-      currency: input.currency,
-      merchant_order_id: input.merchantOrderId,
-      ...(input.descriptor ? { descriptor: input.descriptor } : {}),
-    },
-  });
-  return toPaymentIntent(response);
+  try {
+    const response = await client.request<unknown>('/api/v1/pa/payment_intents/create', {
+      body: {
+        request_id: input.requestId,
+        amount: input.amount,
+        currency: input.currency,
+        merchant_order_id: input.merchantOrderId,
+        ...(input.descriptor ? { descriptor: input.descriptor } : {}),
+      },
+    });
+    return toPaymentIntent(response);
+  } catch (error) {
+    const ambiguous =
+      error instanceof TransportError ||
+      (isAirwallexError(error) &&
+        (error.isDuplicateRequestId || error.status >= 500 || error.code === 'request_pending'));
+    if (ambiguous) {
+      const existing = await findPaymentIntentByRequestId(client, input.requestId);
+      if (existing) return existing;
+    }
+    throw error;
+  }
 }
 
 /** Confirm with the sandbox test card 4035501000000008. */

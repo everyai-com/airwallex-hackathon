@@ -81,6 +81,7 @@ interface MockState {
   globalAccounts: Record<string, unknown>[];
   beneficiaries: Record<string, unknown>[];
   transfers: MockTransfer[];
+  conversions: Record<string, unknown>[];
   requestIds: Map<string, string>;
   cardholders: Record<string, unknown>[];
   cards: MockCard[];
@@ -94,6 +95,18 @@ interface MockState {
 
 export interface MockSeed {
   balances?: Record<string, number>;
+}
+
+export interface MockSnapshot {
+  balances: Record<string, number>;
+  customerBalances: Record<string, Record<string, number>>;
+  transfers: MockTransfer[];
+  conversions: Record<string, unknown>[];
+  moneyMoves: Record<string, any>[];
+  cardTransactions: MockCardTransaction[];
+  cards: MockCard[];
+  disputes: MockDispute[];
+  refunds: Record<string, unknown>[];
 }
 
 export const MOCK_FX_RATES: Record<string, number> = {
@@ -179,6 +192,7 @@ export class MockTransport implements Transport {
       ],
       beneficiaries: [],
       transfers: [],
+      conversions: [],
       requestIds: new Map(),
       cardholders: [],
       cards: [],
@@ -194,6 +208,26 @@ export class MockTransport implements Transport {
   /** Seed balances for a scenario. Balances replace the current values. */
   seed(seed: MockSeed): void {
     if (seed.balances) this.state.platformBalances = { ...seed.balances };
+  }
+
+  /**
+   * Read-only view of everything that moved, for assertions in tests:
+   * transfers, conversions, platform money movement, card transactions,
+   * disputes, and both wallet layers.
+   */
+  snapshot(): MockSnapshot {
+    const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+    return {
+      balances: copy(this.state.platformBalances),
+      customerBalances: copy(Object.fromEntries(this.state.customerBalances)),
+      transfers: copy(this.state.transfers),
+      conversions: copy(this.state.conversions),
+      moneyMoves: copy([...this.state.moneyMoves.values()]),
+      cardTransactions: copy(this.state.cardTransactions),
+      cards: copy(this.state.cards),
+      disputes: copy(this.state.disputes),
+      refunds: copy(this.state.refunds),
+    };
   }
 
   /** Customer wallet for an x-on-behalf-of account, or the platform wallet. */
@@ -275,8 +309,8 @@ export class MockTransport implements Transport {
       const account = this.state.globalAccounts.find((a) => a.id === body.global_account_id);
       if (!account) fail(400, 'invalid_argument', 'Unknown global_account_id.');
       const currency = String(account.currency);
-      if (typeof body.amount !== 'number' || body.amount <= 0) {
-        fail(400, 'invalid_argument', 'amount must be a positive number.');
+      if (typeof body.amount !== 'number' || !Number.isFinite(body.amount) || body.amount <= 0) {
+        fail(400, 'invalid_argument', 'amount must be a positive, finite number.');
       }
       const wallet = this.wallet(this.scopedAccount(request));
       wallet[currency] = round2((wallet[currency] ?? 0) + body.amount);
@@ -361,22 +395,29 @@ export class MockTransport implements Transport {
       }
       wallet[sell] = round2(sellBalance - finalSell);
       wallet[buy] = round2((wallet[buy] ?? 0) + finalBuy);
-      return {
-        status: 201,
-        data: {
-          conversion_id: `cnv_${randomUUID().slice(0, 8)}`,
-          request_id: requestId,
-          status: 'SETTLED',
-          currency_pair: `${sell}${buy}`,
-          client_rate: rate,
-          buy_amount: finalBuy,
-          sell_amount: finalSell,
-          buy_currency: buy,
-          sell_currency: sell,
-          created_at: nowIso(),
-          updated_at: nowIso(),
-        },
+      const conversion = {
+        conversion_id: `cnv_${randomUUID().slice(0, 8)}`,
+        request_id: requestId,
+        status: 'SETTLED',
+        currency_pair: `${sell}${buy}`,
+        client_rate: rate,
+        buy_amount: finalBuy,
+        sell_amount: finalSell,
+        buy_currency: buy,
+        sell_currency: sell,
+        created_at: nowIso(),
+        updated_at: nowIso(),
       };
+      this.state.conversions.push(conversion);
+      return { status: 201, data: conversion };
+    }
+
+    if (method === 'GET' && path === '/api/v1/fx/conversions') {
+      const requestId = query.request_id ? String(query.request_id) : undefined;
+      const items = requestId
+        ? this.state.conversions.filter((item) => item.request_id === requestId)
+        : this.state.conversions;
+      return { status: 200, data: { items } };
     }
 
     if (method === 'POST' && path === '/api/v1/beneficiaries/schema') {
@@ -491,11 +532,10 @@ export class MockTransport implements Transport {
         transfer.status = 'CANCELLED';
         transfer.failure_type = String(body.failure_type ?? 'OTHER');
         transfer.failure_reason = `Simulated failure: ${transfer.failure_type}`;
-        // A failed payout returns the funds (and fee) to the wallet that funded it.
-        const refund = transfer.transfer_amount + transfer.fee_amount;
+        // A failed payout returns the transfer amount, less any applicable fees.
         const wallet = this.wallet(transfer.account_id ?? undefined);
         wallet[transfer.transfer_currency] = round2(
-          (wallet[transfer.transfer_currency] ?? 0) + refund,
+          (wallet[transfer.transfer_currency] ?? 0) + transfer.transfer_amount,
         );
       } else {
         transfer.status = next as MockTransfer['status'];
@@ -653,6 +693,14 @@ export class MockTransport implements Transport {
       return { status: 201, data: { ...intent, client_secret: `secret_${randomUUID()}` } };
     }
 
+    if (method === 'GET' && path === '/api/v1/pa/payment_intents') {
+      const requestId = query.request_id ? String(query.request_id) : undefined;
+      const items = [...this.state.paymentIntents.values()].filter(
+        (intent) => !requestId || intent.request_id === requestId,
+      );
+      return { status: 200, data: { items } };
+    }
+
     const confirmMatch = path.match(/^\/api\/v1\/pa\/payment_intents\/([^/]+)\/confirm$/);
     if (method === 'POST' && confirmMatch) {
       const intent = this.state.paymentIntents.get(confirmMatch[1]!);
@@ -804,13 +852,46 @@ export class MockTransport implements Transport {
     // --- Connected accounts (platform kits 5-8) ---
 
     if (method === 'POST' && path === '/api/v1/accounts/create') {
-      if (body.account_details === undefined) {
+      const details = body.account_details as Record<string, any> | undefined;
+      if (details === undefined) {
         fail(400, 'field_required', 'account_details is required (an empty object is allowed).');
+      }
+      const business = details.business_details as Record<string, any> | undefined;
+      if (!business?.business_name) {
+        fail(400, 'validation_failed', 'account_details.business_details.business_name is required.');
+      }
+      const persons = details.business_person_details as Record<string, any>[] | undefined;
+      if (
+        !Array.isArray(persons) ||
+        persons.length === 0 ||
+        !persons.every(
+          (person) =>
+            person?.first_name &&
+            person?.last_name &&
+            Array.isArray(person?.roles) &&
+            person.roles.length > 0,
+        )
+      ) {
+        fail(
+          400,
+          'validation_failed',
+          'account_details.business_person_details must be a non-empty array of persons with first_name, last_name and roles.',
+        );
+      }
+      if (
+        !Array.isArray(business.business_identifiers) ||
+        business.business_identifiers.length === 0
+      ) {
+        fail(
+          400,
+          'validation_failed',
+          'business_details.business_identifiers (for example an EIN) is required before submit.',
+        );
       }
       const account = {
         id: `acct_${randomUUID().slice(0, 8)}`,
         status: 'CREATED',
-        account_details: body.account_details,
+        account_details: details,
         created_at: nowIso(),
       };
       this.state.accounts.push(account);

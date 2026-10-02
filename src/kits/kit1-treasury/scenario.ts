@@ -142,6 +142,3 @@ export const CONTRADICTING_EMAIL = {
   subject: 'Re: Invoice NW-4417 — timing',
   body: 'Our treasury committee meets Friday, so the NW-4417 payment may slip by about a week. Sorry for the late notice.',
 };
-
-export const TREASURY_DEMO_WALLET_HINT =
-  'For the intended scarcity beat, hold about USD 14,000 in USD plus ~EUR 1,150 and ~GBP 1,200.';

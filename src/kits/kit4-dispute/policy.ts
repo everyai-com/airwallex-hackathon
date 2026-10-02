@@ -32,7 +32,7 @@ export function decideDispute(disputeCase: DisputeCase, disputeFee: number): Dis
   ) {
     return {
       action: 'ACCEPT',
-      reason: `Amount at risk ${amount} <= dispute fee ${disputeFee} and the delivery scan has no signature — accepting costs less than defending.`,
+      reason: `The USD ${disputeFee} fee is charged win or lose, and the unsigned delivery scan means we would likely lose too — accepting the USD ${amount} claim costs the same as a losing challenge without the effort or customer friction.`,
       acceptReason: 'LOW_VALUE_TRANSACTION',
     };
   }

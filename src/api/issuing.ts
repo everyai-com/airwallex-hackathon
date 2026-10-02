@@ -140,7 +140,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 /**
  * Cardholders reach READY without an approval call — poll instead of calling
- * pass_review. Virtual cards activate automatically.
+ * pass_review. Fails loudly rather than creating a card against a cardholder
+ * that is still PENDING or INCOMPLETE.
  */
 export async function waitForCardholderReady(
   client: AirwallexClient,
@@ -153,6 +154,11 @@ export async function waitForCardholderReady(
     last = await getCardholder(client, cardholderId, options);
     if (last.status === 'READY') return last;
     await sleep(1_000);
+  }
+  if (last.status !== 'READY') {
+    throw new Error(
+      `Cardholder ${cardholderId} is ${last.status ?? 'unknown'} after ${attempts} checks; refusing to issue a card.`,
+    );
   }
   return last;
 }
@@ -168,6 +174,11 @@ export async function waitForCardActive(
     last = await getCard(client, cardId, options);
     if (last.cardStatus === 'ACTIVE') return last;
     await sleep(1_000);
+  }
+  if (last.cardStatus !== 'ACTIVE') {
+    throw new Error(
+      `Card ${cardId} is ${last.cardStatus ?? 'unknown'} after ${attempts} checks; refusing to use a card that is not ACTIVE.`,
+    );
   }
   return last;
 }

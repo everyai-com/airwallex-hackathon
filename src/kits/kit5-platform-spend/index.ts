@@ -8,7 +8,6 @@ import {
 } from '../../api/issuing.js';
 import { collectCharge, connectedAccountTransfer, PLATFORM_REASONS } from '../../api/platform.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { round2 } from '../../core/money.js';
 import {
@@ -19,7 +18,7 @@ import {
 import { SPEND_POLICY, planBridges, type BridgeRequest } from './policy.js';
 
 export async function runKit5(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   client.seedMockBalances({ USD: 14_200 });
 
   logger.chapter('Platform Spend Controller — cards for customers, rationed bridge capital');
@@ -147,7 +146,7 @@ export async function runKit5(client: AirwallexClient, logger: Logger): Promise<
     logger.detail('Result', `${transaction.processResult} — ${transaction.failureReason}`);
     logger.decision(
       'ORDER',
-      'Fund the customer wallet enough to reach the card-limit check; otherwise Airwallex returns insufficient funds first.',
+      'The limit check passes at 1,500 (limit 2,000); the wallet is checked after the controls. Fund the customer enough to reach the limit check, or insufficient funds is what you see.',
     );
   });
 
@@ -216,14 +215,18 @@ export async function runKit5(client: AirwallexClient, logger: Logger): Promise<
   });
 
   const finalPlatform = balanceOf(await getBalances(client), 'USD');
+  const bridged = plan.approved.map((request) => request.customerName.split(' (')[0]).join(', ');
+  const declined = plan.declined.map((entry) => entry.request.customerName.split(' (')[0]).join(', ');
   logger.chapter('Outcome');
   logger.detail('Platform wallet', `USD ${round2(finalPlatform)}`);
   logger.detail(
     'Isolation',
-    "customer spend hit customer wallets, never the platform's money; one bridge advanced and recovered, fees collected",
+    "customer spend hit customer wallets, never the platform's money",
   );
   logger.detail(
-    'Held back',
-    `Juniper's bridge was declined — USD ${plan.capacityUsd} of capacity remained when its request was considered`,
+    'Bridges',
+    bridged
+      ? `${bridged} advanced and recovered${declined ? `; ${declined} declined — capacity ran out against the reserve floor` : ''}`
+      : `none advanced; all requests declined against the reserve floor`,
   );
 }

@@ -11,7 +11,6 @@ import {
 } from '../../api/payments.js';
 import type { AirwallexClient } from '../../core/client.js';
 import { isAirwallexError } from '../../core/errors.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount } from '../../core/money.js';
 import { DISPUTE_CASES, DISPUTE_FEE_USD, TEST_CARD, type DisputeCase } from './cases.js';
@@ -21,7 +20,7 @@ import { decideAfterRejection, decideDispute, type DisputeDecision } from './pol
 const ARBITRATION_COST_USD = 500;
 
 export async function runKit4(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
 
   logger.chapter('Dispute Response Agent — three chargebacks, three different economics');
   logger.info(

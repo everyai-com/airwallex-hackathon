@@ -7,7 +7,6 @@ import {
   PLATFORM_REASONS,
 } from '../../api/platform.js';
 import type { AirwallexClient } from '../../core/client.js';
-import { RequestIds } from '../../core/ids.js';
 import type { Logger } from '../../core/log.js';
 import { round2 } from '../../core/money.js';
 import {
@@ -24,7 +23,7 @@ import {
 } from './policy.js';
 
 export async function runKit8(client: AirwallexClient, logger: Logger): Promise<void> {
-  const ids = new RequestIds();
+  const ids = client.requestIds();
   client.seedMockBalances({ USD: 14_200 });
 
   logger.chapter('Marketplace Settlement Agent — seller reserves, payouts, and refund exposure');
@@ -149,6 +148,9 @@ export async function runKit8(client: AirwallexClient, logger: Logger): Promise<
   await logger.step('Reconcile the cycle and write the settlement report', async () => {
     const owesTotal = round2(sellers.reduce((total, seller) => total + seller.owed, 0));
     const check = reconcile(owesTotal, settlements, refundRecovery, refundRecovery);
+    const actualPlatform = usdBalance(await getBalances(client));
+    const expectedPlatform = round2(heldReservesUsd + refundRecovery);
+    const walletMatches = Math.abs(actualPlatform - expectedPlatform) <= 0.01;
     logger.detail('Owed to sellers', `USD ${owesTotal}`);
     logger.detail('Payouts', `USD ${check.payoutsUsd}`);
     logger.detail('Reserves held', `USD ${check.reservesUsd}`);
@@ -157,8 +159,12 @@ export async function runKit8(client: AirwallexClient, logger: Logger): Promise<
       `USD ${refundRecovery} recovered from Crest; refund payouts to buyers clear on the payments side`,
     );
     logger.detail(
-      'Expected platform after refunds clear',
-      `USD ${check.platformUsd}${check.balanced ? ' — reconciled (payouts + reserves = owed)' : ' — OUT OF BALANCE'}`,
+      'Ledger check',
+      `payouts + reserves = owed: ${check.balanced ? 'yes' : 'NO'}`,
+    );
+    logger.detail(
+      'Wallet check',
+      `USD ${round2(actualPlatform)} on hand vs USD ${expectedPlatform} expected (reserves ${heldReservesUsd} + refund coverage ${refundRecovery}) — ${walletMatches ? 'matches' : 'MISMATCH'}`,
     );
     const report = await createPlatformReport(client, {
       type: 'SETTLEMENT_REPORT',

@@ -189,9 +189,14 @@ export class ClaudeAnalyst implements Analyst {
         json.direction === 'reaffirmed' || json.direction === 'contradicted'
           ? json.direction
           : 'weakened';
+      const parsedConfidence = Number(json.confidence);
       return {
         direction,
-        confidence: clamp(Number(json.confidence ?? input.forecast.confidence), 0.05, 0.99),
+        confidence: clamp(
+          Number.isFinite(parsedConfidence) ? parsedConfidence : input.forecast.confidence,
+          0.05,
+          0.99,
+        ),
         rationale: String(json.rationale ?? '').slice(0, 600),
         citedEvidence: Array.isArray(json.cited_evidence)
           ? json.cited_evidence.map((item) => String(item)).slice(0, 5)
