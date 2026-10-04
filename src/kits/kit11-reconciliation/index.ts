@@ -93,9 +93,10 @@ export async function runKit11(
   logger.chapter('Decide and act — match, hold or escalate');
   const decisions: MatchDecision[] = [];
   const priorReceipts: Receipt[] = [];
+  const postedWriteOffs: Record<string, number> = {};
+  const credits: Record<string, number> = {};
+  const unapplied: Record<string, number> = {};
   let approvalsUsed = 0;
-  let creditsUsd = 0;
-  let unappliedUsd = 0;
 
   for (const receipt of RECEIPTS) {
     await logger.step(
@@ -130,6 +131,7 @@ export async function runKit11(
         });
         decisions.push(decision);
 
+        let postedWriteOff = 0;
         if (decision.requiresApproval) {
           const approval = await gate.request({
             operationId: `reconcile-${receipt.id}`,
@@ -142,6 +144,7 @@ export async function runKit11(
           if (approval.approved) {
             approvalsUsed += 1;
             invoices = applyMatch(invoices, decision);
+            postedWriteOff = decision.writeOffAmount;
             logger.detail('Approval', `cleared by ${approval.approver}`);
           } else {
             invoices = applyMatch(invoices, {
@@ -153,11 +156,19 @@ export async function runKit11(
           }
         } else {
           invoices = applyMatch(invoices, decision);
+          postedWriteOff = decision.writeOffAmount;
         }
 
         priorReceipts.push(receipt);
-        creditsUsd = round2(creditsUsd + decision.creditAmount);
-        unappliedUsd = round2(unappliedUsd + decision.unappliedAmount);
+        if (postedWriteOff > 0) {
+          postedWriteOffs[receipt.currency] = round2(
+            (postedWriteOffs[receipt.currency] ?? 0) + postedWriteOff,
+          );
+        }
+        credits[receipt.currency] = round2((credits[receipt.currency] ?? 0) + decision.creditAmount);
+        unapplied[receipt.currency] = round2(
+          (unapplied[receipt.currency] ?? 0) + decision.unappliedAmount,
+        );
         logger.detail('Decision', `${decision.kind} — ${decision.reason}`);
       },
     );
@@ -170,26 +181,25 @@ export async function runKit11(
   for (const line of balances) wallet[line.currency] = line.available;
 
   const applied: Record<string, number> = {};
-  const writtenOff: Record<string, number> = {};
   for (const decision of decisions) {
     const currency = RECEIPTS.find((entry) => entry.id === decision.receiptId)?.currency ?? 'USD';
     if (decision.appliedAmount > 0) {
       applied[currency] = round2((applied[currency] ?? 0) + decision.appliedAmount);
     }
-    if (decision.writeOffAmount > 0) {
-      writtenOff[currency] = round2((writtenOff[currency] ?? 0) + decision.writeOffAmount);
-    }
   }
+  const creditsUsd = credits.USD ?? 0;
+  const unappliedUsd = unapplied.USD ?? 0;
 
   for (const currency of ['USD', 'EUR'] as const) {
     const open = opening[currency] ?? 0;
-    const gone = (applied[currency] ?? 0) + (writtenOff[currency] ?? 0) + (closing[currency] ?? 0);
+    const gone =
+      (applied[currency] ?? 0) + (postedWriteOffs[currency] ?? 0) + (closing[currency] ?? 0);
     if (Math.abs(open - gone) > 0.01) {
       throw new Error(
         `AR does not reconcile for ${currency}: opening ${open} vs applied+written-off+closing ${round2(gone)}.`,
       );
     }
-    const received = (applied[currency] ?? 0) + (currency === 'USD' ? creditsUsd + unappliedUsd : 0);
+    const received = (applied[currency] ?? 0) + (credits[currency] ?? 0) + (unapplied[currency] ?? 0);
     if (Math.abs((startingCash[currency] ?? 0) + received - (wallet[currency] ?? 0)) > 0.01) {
       throw new Error(
         `Cash does not reconcile for ${currency}: starting ${startingCash[currency] ?? 0} + receipts ${round2(received)} vs wallet ${wallet[currency] ?? 0}.`,
@@ -202,13 +212,18 @@ export async function runKit11(
     Object.keys(opening)
       .map(
         (currency) =>
-          `${currency}: ${opening[currency]?.toFixed(2)} opening = ${(applied[currency] ?? 0).toFixed(2)} applied + ${(writtenOff[currency] ?? 0).toFixed(2)} written off + ${(closing[currency] ?? 0).toFixed(2)} still open`,
+          `${currency}: ${opening[currency]?.toFixed(2)} opening = ${(applied[currency] ?? 0).toFixed(2)} applied + ${(postedWriteOffs[currency] ?? 0).toFixed(2)} written off + ${(closing[currency] ?? 0).toFixed(2)} still open`,
       )
       .join(' | '),
   );
   logger.detail(
     'Cash identity',
-    `USD wallet ${round2(wallet.USD ?? 0)} = ${startingCash.USD ?? 0} starting + ${(applied.USD ?? 0).toFixed(2)} applied + ${creditsUsd.toFixed(2)} customer credit + ${unappliedUsd.toFixed(2)} held unapplied`,
+    Object.keys(startingCash)
+      .map(
+        (currency) =>
+          `${currency} wallet ${(wallet[currency] ?? 0).toFixed(2)} = ${startingCash[currency]} starting + ${(applied[currency] ?? 0).toFixed(2)} applied + ${(credits[currency] ?? 0).toFixed(2)} credit + ${(unapplied[currency] ?? 0).toFixed(2)} unapplied`,
+      )
+      .join(' | '),
   );
   logger.decision('RECONCILED', 'every receipt is either applied, held or escalated — and the numbers close.');
 
@@ -233,6 +248,6 @@ export async function runKit11(
     invoices,
     approvalsUsed,
     wallet,
-    arCheck: { opening, applied, writtenOff, creditsUsd, unappliedUsd, closing },
+    arCheck: { opening, applied, writtenOff: postedWriteOffs, creditsUsd, unappliedUsd, closing },
   };
 }

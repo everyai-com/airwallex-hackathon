@@ -22,7 +22,7 @@ import {
 import { RECEIPTS } from '../src/kits/kit11-reconciliation/scenario.js';
 import { runKit12 } from '../src/kits/kit12-close/index.js';
 import { isBalanced, makeEntry, trialBalance } from '../src/kits/kit12-close/ledger.js';
-import { assessClose, decideCutoff, fxRevaluation } from '../src/kits/kit12-close/policy.js';
+import { assessClose, decideCutoff, fxRevaluation, writeOffPosts } from '../src/kits/kit12-close/policy.js';
 import { runKit13 } from '../src/kits/kit13-collections/index.js';
 import { assessPlan, decideCollection } from '../src/kits/kit13-collections/policy.js';
 import { AS_OF, customerFor } from '../src/kits/kit13-collections/scenario.js';
@@ -113,6 +113,44 @@ test('kit11 matches every receipt shape and gates deductions beyond tolerance', 
   assert.equal(unmatched?.requiresApproval, true);
 });
 
+test('kit11 labels a spread payment partial when any referenced target stays open', () => {
+  let invoices = buildReceivables();
+  const first = RECEIPTS.find((entry) => entry.id === 'rcp-03');
+  assert.ok(first);
+  invoices = applyMatch(invoices, matchReceipt(first, { invoices, priorReceipts: [] }));
+
+  const spread: Receipt = {
+    id: 'rcp-x',
+    customer: 'Northwind Traders',
+    amount: 5_500,
+    currency: 'USD',
+    reference: 'INV-1041 balance',
+    receivedAt: '2026-10-04T15:00:00Z',
+    channel: 'BANK_TRANSFER',
+  };
+  const decision = matchReceipt(spread, { invoices, priorReceipts: [first] });
+  assert.equal(decision.kind, 'PARTIAL');
+  assert.equal(decision.appliedAmount, 5_500);
+  assert.deepEqual(decision.invoiceIds, ['INV-1041', 'INV-1042']);
+});
+
+test('kit11 a refused write-off stays open instead of breaking the identities', async () => {
+  const client = testClient();
+  const result = await runKit11(client, logger, {
+    autoApprove: false,
+    forceHeuristicAnalyst: true,
+  });
+
+  assert.equal(result.approvalsUsed, 0);
+  const deduction = result.decisions.find((entry) => entry.receiptId === 'rcp-02');
+  assert.equal(deduction?.kind, 'DEDUCTION');
+  assert.equal(result.arCheck.writtenOff.USD ?? 0, 0, 'a denied write-off posts nothing');
+  assert.equal(result.arCheck.closing.USD, 9_820);
+  const stillOpen = result.invoices.find((entry) => entry.id === 'INV-1044');
+  assert.ok(stillOpen);
+  assert.equal(outstanding(stillOpen), 120, 'the deducted balance stays open');
+});
+
 test('kit11 reconciles the whole bank feed against the AR book and the wallet', async () => {
   const client = testClient();
   const result = await runKit11(client, logger, {
@@ -186,6 +224,9 @@ test('kit12 decides cutoff, revaluation and close blockers', () => {
   const closed = assessClose({ writeOffUsd: 150, unappliedUsd: 12_000, fxLossUsd: 86.8 });
   assert.equal(closed.blockers.length, 0);
   assert.equal(closed.notes.length, 3);
+
+  assert.equal(writeOffPosts(150), true, 'within the autonomous limit');
+  assert.equal(writeOffPosts(600), false, 'beyond the limit — blocked until signed');
 });
 
 test('kit12 closes with a balanced trial balance tied to the wallet', async () => {

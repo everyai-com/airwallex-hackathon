@@ -20,7 +20,7 @@ The official challenge map is in `submission/CHALLENGE.md`.
 ```sh
 npm install
 npx tsx src/cli.ts all --mock   # all thirteen kits end to end, exit 0, no credentials
-npm test                        # 48 passing tests
+npm test                        # 50 passing tests
 ```
 
 ## Contents

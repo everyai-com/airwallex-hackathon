@@ -97,7 +97,7 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 ## 4. Submission checklist
 
 - [x] `npm run typecheck` clean
-- [x] `npm test` — 48 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, and effect assertions on all thirteen kits)
+- [x] `npm test` — 50 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, and effect assertions on all thirteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)

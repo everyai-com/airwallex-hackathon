@@ -47,6 +47,11 @@ export interface CloseAssessment {
   notes: { id: string; reason: string }[];
 }
 
+/** Whether a write-off posts autonomously at close. */
+export function writeOffPosts(amountUsd: number): boolean {
+  return amountUsd <= CLOSE_POLICY.writeOffAutoLimitUsd + 0.005;
+}
+
 /** What a person must sign before close, and what the close pack must disclose. */
 export function assessClose(input: {
   writeOffUsd: number;
@@ -56,7 +61,7 @@ export function assessClose(input: {
   const blockers: { id: string; reason: string }[] = [];
   const notes: { id: string; reason: string }[] = [];
 
-  if (input.writeOffUsd > CLOSE_POLICY.writeOffAutoLimitUsd + 0.005) {
+  if (input.writeOffUsd > 0 && !writeOffPosts(input.writeOffUsd)) {
     blockers.push({
       id: 'write-off',
       reason: `Write-off of USD ${input.writeOffUsd.toFixed(2)} exceeds the USD ${CLOSE_POLICY.writeOffAutoLimitUsd} autonomous limit — a person must sign before close.`,

@@ -149,7 +149,6 @@ export function matchReceipt(receipt: Receipt, context: MatchContext): MatchDeci
   let writeOffAmount = 0;
   let writeOffTolerance: number | undefined;
   let requiresApproval = false;
-  const primary = targets[0]!;
 
   const applyTo = (target: Invoice): void => {
     if (remaining <= 0.005) return;
@@ -182,10 +181,17 @@ export function matchReceipt(receipt: Receipt, context: MatchContext): MatchDeci
   const creditAmount = remaining > 0.005 ? round2(remaining) : 0;
 
   const appliedAmount = round2(allocations.reduce((sum, entry) => sum + entry.applied, 0));
-  const primaryOpen = outstanding(primary);
-  const primaryHandled = allocations
-    .filter((entry) => entry.invoiceId === primary.id)
-    .reduce((sum, entry) => sum + entry.applied + entry.writeOff, 0);
+  const openTargets = [...new Set(allocations.map((entry) => entry.invoiceId))]
+    .map((invoiceId) => {
+      const invoice = context.invoices.find((entry) => entry.id === invoiceId);
+      if (!invoice) return { id: invoiceId, open: 0 };
+      const handled = allocations
+        .filter((entry) => entry.invoiceId === invoiceId)
+        .reduce((sum, entry) => sum + entry.applied + entry.writeOff, 0);
+      return { id: invoiceId, open: round2(Math.max(0, outstanding(invoice) - handled)) };
+    })
+    .filter((entry) => entry.open > 0.005);
+  const openAfter = round2(openTargets.reduce((sum, entry) => sum + entry.open, 0));
 
   let kind: MatchKind;
   let reason: string;
@@ -195,14 +201,14 @@ export function matchReceipt(receipt: Receipt, context: MatchContext): MatchDeci
   } else if (writeOffAmount > 0) {
     kind = 'DEDUCTION';
     reason = requiresApproval
-      ? `the remittance claims a ${money(writeOffAmount)} deduction on ${primary.id}, above the ${money(writeOffTolerance ?? 0)} autonomous tolerance — a person must approve the write-off before it posts.`
-      : `the remittance claims a ${money(writeOffAmount)} deduction on ${primary.id}, within the ${money(writeOffTolerance ?? 0)} autonomous tolerance — written off with the payment.`;
+      ? `the remittance claims a ${money(writeOffAmount)} deduction, above the ${money(writeOffTolerance ?? 0)} autonomous tolerance — a person must approve the write-off before it posts.`
+      : `the remittance claims a ${money(writeOffAmount)} deduction, within the ${money(writeOffTolerance ?? 0)} autonomous tolerance — written off with the payment.`;
   } else if (refs.length === 0) {
     kind = 'UNREFERENCED';
-    reason = `no reference on the wire, but the amount equals ${primary.id} exactly; applied ${money(appliedAmount)} on the payer + amount evidence.`;
-  } else if (primaryHandled + 0.005 < primaryOpen) {
+    reason = `no reference on the wire, but the amount equals ${targets[0]?.id ?? 'an open invoice'} exactly; applied ${money(appliedAmount)} on the payer + amount evidence.`;
+  } else if (openAfter > 0.005) {
     kind = 'PARTIAL';
-    reason = `applied ${money(primaryHandled)} to ${primary.id}; ${money(round2(primaryOpen - primaryHandled))} stays open for ${receipt.customer} to pay.`;
+    reason = `applied ${money(appliedAmount)}; ${money(openAfter)} stays open on ${openTargets.map((entry) => entry.id).join(', ')} for ${receipt.customer} to pay.`;
   } else {
     kind = 'EXACT';
     reason = `matched by reference to ${allocations.map((entry) => entry.invoiceId).join(', ')}; applied ${money(appliedAmount)} — settled in full.`;

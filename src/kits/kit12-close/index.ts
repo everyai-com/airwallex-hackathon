@@ -14,6 +14,7 @@ import {
   assessClose,
   decideCutoff,
   fxRevaluation,
+  writeOffPosts,
   type CloseAssessment,
   type CutoffDecision,
 } from './policy.js';
@@ -94,6 +95,8 @@ export async function runKit12(client: AirwallexClient, logger: Logger): Promise
   logger.chapter('Act — post the balanced journal');
   const eurReceiptUsd = round2(PERIOD_RECEIPTS.eur * BOOK_EUR_RATE);
   const eurRevenueUsd = round2(PERIOD_REVENUE.eur * BOOK_EUR_RATE);
+  const writeOffBlocked = !writeOffPosts(WRITE_OFF.amountUsd);
+  const fxAmount = Math.abs(revaluation.lossUsd);
   const entries: JournalEntry[] = [
     makeEntry(CLOSE_PERIOD.asOf, 'Opening balances — October 2026', OPENING_TRIAL_BALANCE),
     makeEntry(CLOSE_PERIOD.asOf, `Revenue recognized — USD ${PERIOD_REVENUE.usd}, EUR ${PERIOD_REVENUE.eur}`, [
@@ -115,19 +118,42 @@ export async function runKit12(client: AirwallexClient, logger: Logger): Promise
       { account: 'PREPAID_INSURANCE', debit: PREPAID_INSURANCE_USD },
       { account: 'CASH_USD', credit: PREPAID_INSURANCE_USD },
     ]),
-    makeEntry(CLOSE_PERIOD.asOf, `Write-off ${WRITE_OFF.invoiceId} (${WRITE_OFF.customer})`, [
-      { account: 'BAD_DEBT', debit: WRITE_OFF.amountUsd },
-      { account: 'AR_USD', credit: WRITE_OFF.amountUsd },
-    ]),
+    ...(writeOffBlocked
+      ? []
+      : [
+          makeEntry(CLOSE_PERIOD.asOf, `Write-off ${WRITE_OFF.invoiceId} (${WRITE_OFF.customer})`, [
+            { account: 'BAD_DEBT', debit: WRITE_OFF.amountUsd },
+            { account: 'AR_USD', credit: WRITE_OFF.amountUsd },
+          ]),
+        ]),
     makeEntry(CLOSE_PERIOD.asOf, 'Payroll accrual — paid next period', [
       { account: 'PAYROLL_EXPENSE', debit: PAYROLL_ACCRUAL_USD },
       { account: 'ACCRUED_PAYROLL', credit: PAYROLL_ACCRUAL_USD },
     ]),
-    makeEntry(CLOSE_PERIOD.asOf, 'EUR balances revalued to the closing rate', [
-      { account: 'FX_REVALUATION_LOSS', debit: revaluation.lossUsd },
-      { account: 'FX_VALUATION_RESERVE', credit: revaluation.lossUsd },
-    ]),
+    ...(fxAmount > 0
+      ? [
+          makeEntry(
+            CLOSE_PERIOD.asOf,
+            `EUR balances revalued to the closing rate (${revaluation.lossUsd >= 0 ? 'loss' : 'gain'} USD ${fxAmount.toFixed(2)})`,
+            revaluation.lossUsd >= 0
+              ? [
+                  { account: 'FX_REVALUATION_LOSS', debit: fxAmount },
+                  { account: 'FX_VALUATION_RESERVE', credit: fxAmount },
+                ]
+              : [
+                  { account: 'FX_VALUATION_RESERVE', debit: fxAmount },
+                  { account: 'FX_REVALUATION_GAIN', credit: fxAmount },
+                ],
+          ),
+        ]
+      : []),
   ];
+  if (writeOffBlocked) {
+    logger.detail(
+      'Write-off held',
+      `${WRITE_OFF.invoiceId} USD ${WRITE_OFF.amountUsd} is not posted — sign-off required; the receivable stays open.`,
+    );
+  }
 
   for (const entry of entries) {
     const total = round2(entry.lines.reduce((sum, line) => sum + (line.debit ?? 0), 0));
