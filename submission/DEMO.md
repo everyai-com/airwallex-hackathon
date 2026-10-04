@@ -102,7 +102,7 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 - [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
 - [x] Live-verified kits 1–3 and 11–13 against the sandbox; kit 4 waits on native Payment Acceptance enablement, kits 5–10 on platform/Airi/merchant access (all asked for in `enablement-requests.md`)
 - [x] Live Kit 1 run recorded (~22s, real time, no credentials shown): [release video](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
-- [ ] Enablement emails sent — the consolidated draft is ready in `submission/ready-to-send-email.txt`; no mail client was configured on this machine, so paste it into Gmail (or another account) and send it to devhelp@airwallex.com
+- [x] Enablement emails sent — the consolidated email to devhelp@airwallex.com went out from Gmail on 2026-10-04 (platform access, native Payment Acceptance, Airi CLI, merchant Agentic Commerce, credits, submission details)
 - [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)
 - [x] Recording shows no credentials (terminal text only)
 - [x] Repo link + one-paragraph summary: [github.com/everyai-com/airwallex-hackathon](https://github.com/everyai-com/airwallex-hackathon) — summary in `submission/SUMMARY.md`
