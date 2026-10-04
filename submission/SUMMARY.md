@@ -13,10 +13,11 @@ account, kits 5–8 against the in-memory sandbox simulator until platform acces
 9–10 add an in-process merchant Agentic Commerce simulator on the same rails — every demo runs end
 to end with `--mock` and the same code paths switch to live sandbox calls as enablements arrive.
 
-The official challenge map is in `submission/CHALLENGE.md`. Kit 1 is also verified live against
-the sandbox: beneficiary creation, a LOCAL transfer to PAID, the confidence-triggered approval
-gate, a settled FX conversion, and a SWIFT payout all ran on `api.sandbox.airwallex.com`. A
-recorded live run is attached to the repo's releases.
+The official challenge map is in `submission/CHALLENGE.md`. Kits 1–3 and 11–13 are also verified
+live against the sandbox: beneficiary creation, transfers to PAID, an approval gate, a settled FX
+conversion, a SWIFT payout, reconciliation, a full close with a balanced trial balance, and the
+collections plan recovery all ran on `api.sandbox.airwallex.com`. A recorded live run of Kit 1 is
+attached to the repo's releases.
 
 ## Verify in one command
 

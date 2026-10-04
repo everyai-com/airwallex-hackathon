@@ -11,9 +11,13 @@ export interface GlobalAccount {
 
 function toGlobalAccount(item: unknown): GlobalAccount {
   const record = asRecord(item);
+  // Live list items carry the currency inside required_features; the mock puts
+  // it at the top level. Read both so lookups match real accounts.
+  const features = Array.isArray(record.required_features) ? record.required_features : [];
+  const firstFeature = asRecord(features[0]);
   return {
     id: String(record.id ?? ''),
-    currency: String(record.currency ?? ''),
+    currency: String(record.currency ?? firstFeature.currency ?? ''),
     ...(str(record.country_code, record.countryCode) ? { countryCode: str(record.country_code, record.countryCode) } : {}),
     ...(str(record.status) ? { status: str(record.status) } : {}),
   };
@@ -80,11 +84,20 @@ export async function ensureGlobalAccount(
   if (existing) return existing;
   const countryForCurrency: Record<string, string> = { USD: 'US', EUR: 'DE', GBP: 'GB' };
   const countryCode = countryForCurrency[currency] ?? 'US';
-  return createGlobalAccount(client, {
-    requestId: randomUUID(),
-    countryCode,
-    currency,
-    transferMethod: 'LOCAL',
-    ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
-  });
+  try {
+    return await createGlobalAccount(client, {
+      requestId: randomUUID(),
+      countryCode,
+      currency,
+      transferMethod: 'LOCAL',
+      ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
+    });
+  } catch (error) {
+    // The sandbox caps virtual accounts per currency; re-list in case the
+    // account exists but was created after the first read.
+    const retry = await listGlobalAccounts(client, options);
+    const found = retry.find((account) => account.currency === currency);
+    if (found) return found;
+    throw error;
+  }
 }

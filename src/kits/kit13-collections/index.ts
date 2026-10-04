@@ -1,4 +1,4 @@
-import { formatBalances, getBalances } from '../../api/balances.js';
+import { balanceOf, formatBalances, getBalances } from '../../api/balances.js';
 import { ensureGlobalAccount, simulateDeposit } from '../../api/global-accounts.js';
 import { createAnalyst } from '../../core/analyst.js';
 import { ApprovalGate } from '../../core/approvals.js';
@@ -62,7 +62,13 @@ export async function runKit13(
   });
 
   client.seedMockBalances({ USD: 30_000, EUR: 10_000 });
-  const startingCash = { USD: 30_000, EUR: 10_000 };
+  // Live runs start from whatever the wallet holds, so the cash tie-out stays
+  // true on a re-run; the mock seeds the scenario cash above.
+  const openingBalances = await getBalances(client);
+  const startingCash = {
+    USD: balanceOf(openingBalances, 'USD'),
+    EUR: balanceOf(openingBalances, 'EUR'),
+  };
 
   let invoices: Invoice[] = [...buildReceivables(), SMALL_BALANCE];
   const opening = openByCurrency(invoices);

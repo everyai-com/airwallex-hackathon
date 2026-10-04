@@ -327,11 +327,13 @@ submission/                 enablement email templates + demo script + checklist
 - **Merchant checkouts snapshot prices, expire after an hour, and replay orders by `request_id`**,
   so a stale price is refused and a retry returns the same order instead of a second charge.
 - **Live sandbox quirks the code absorbed**: `GET /balances/current` returns a bare array live
-  (the mock wraps it in `items`); transfers require `source_currency` and start `SCHEDULED`;
-  FX quotes require `validity`; conversions and deposits post a few seconds after they report
-  success, so payouts wait for the funded balance; live SWIFT fees are percentage-based while the
-  mock models the documented flat EUR 12.85. Kit 1 is verified end to end against
-  `api.sandbox.airwallex.com`.
+  (the mock wraps it in `items`); global-account list items carry the currency inside
+  `required_features`; transfers require `source_currency` and start `SCHEDULED`; FX quotes require
+  `validity`; conversions and deposits post a few seconds after they report success, so payouts
+  wait for the funded balance; live SWIFT fees are percentage-based while the mock models the
+  documented flat EUR 12.85. Kits 1–3 and 11–13 are verified end to end against
+  `api.sandbox.airwallex.com`; kit 4 waits on native Payment Acceptance enablement and kits 5–10
+  on platform/Airi/merchant access (see `submission/enablement-requests.md`).
 - **Receivables rules live in code**: deductions clear autonomously only within a
   `max(USD 25, 2%)` tolerance, duplicates are held as unapplied cash, unmatched receipts over
   USD 1,000 need a person, and the AR and cash identities must close or the run fails.

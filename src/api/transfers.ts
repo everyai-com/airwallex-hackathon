@@ -117,6 +117,30 @@ export async function getTransfer(
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Live sandbox transfers start SCHEDULED; nudge them into PROCESSING when the
+ * simulator allows it, otherwise wait for the natural lifecycle to move them.
+ */
+export async function ensureTransferProcessing(
+  client: AirwallexClient,
+  transfer: TransferRecord,
+  options: { onBehalfOf?: string } = {},
+): Promise<TransferRecord> {
+  let current = transfer;
+  for (let attempt = 0; attempt < 6 && current.status === 'SCHEDULED'; attempt += 1) {
+    try {
+      current = await simulateTransferTransition(client, current.id, {
+        nextStatus: 'PROCESSING',
+        ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
+      });
+    } catch {
+      await sleep(900);
+      current = await getTransfer(client, current.id, options);
+    }
+  }
+  return current;
+}
+
+/**
  * Drive a transfer to PAID through the sandbox simulator. Resumable: a transfer
  * that is already PAID (for example from an earlier run with a persisted
  * request id) is returned untouched instead of being simulated again.
@@ -135,19 +159,7 @@ export async function advanceTransferToPaid(
   }
 
   if (current.status === 'SCHEDULED') {
-    // Live sandbox transfers start SCHEDULED; nudge them into PROCESSING when
-    // the simulator allows it, otherwise wait for the natural lifecycle.
-    for (let attempt = 0; attempt < 5 && current.status === 'SCHEDULED'; attempt += 1) {
-      try {
-        current = await simulateTransferTransition(client, current.id, {
-          nextStatus: 'PROCESSING',
-          ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
-        });
-      } catch {
-        await sleep(700);
-        current = await getTransfer(client, current.id, options);
-      }
-    }
+    current = await ensureTransferProcessing(client, current, options);
     if (current.status === 'SCHEDULED') return current;
   }
   if (current.status === 'PROCESSING') {

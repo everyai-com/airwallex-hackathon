@@ -1,4 +1,4 @@
-import { formatBalances, getBalances } from '../../api/balances.js';
+import { balanceOf, formatBalances, getBalances } from '../../api/balances.js';
 import { ensureGlobalAccount, simulateDeposit } from '../../api/global-accounts.js';
 import { createAnalyst } from '../../core/analyst.js';
 import { ApprovalGate } from '../../core/approvals.js';
@@ -58,7 +58,13 @@ export async function runKit11(
   });
 
   client.seedMockBalances({ USD: 5_000, EUR: 0 });
-  const startingCash: Record<string, number> = { USD: 5_000, EUR: 0 };
+  // Live runs start from whatever the wallet holds, so the cash identity stays
+  // true on a re-run; the mock seeds the scenario cash above.
+  const openingCashLines = await getBalances(client);
+  const startingCash: Record<string, number> = {
+    USD: balanceOf(openingCashLines, 'USD'),
+    EUR: balanceOf(openingCashLines, 'EUR'),
+  };
 
   logger.chapter('Invoice-Matching Reconciliation Agent — observe → decide → act → reconcile');
   logger.info(

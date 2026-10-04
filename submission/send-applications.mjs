@@ -66,6 +66,10 @@ platform kits built and tested against a simulator: Platform Spend Controller,
 Multi-Employer Payroll Executor, Portfolio Lending Agent, Marketplace Settlement
 Agent. They are ready to run live immediately.
 
+Also, please enable native Payment Acceptance API access on this sandbox account:
+creating payment intents currently returns "This account is not enabled for native
+API access" and our disputes demo (kit 4) needs it.
+
 2) AIRI CLI + CARD BUDGET (kit 9)
 Airi account email: ${airiEmail}
 Please allowlist Airi CLI for this account and send the beta testing, installation

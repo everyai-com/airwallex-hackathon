@@ -1,4 +1,5 @@
-import { formatBalances, getBalances } from '../../api/balances.js';
+import { balanceOf, formatBalances, getBalances } from '../../api/balances.js';
+import { ensureGlobalAccount, simulateDeposit } from '../../api/global-accounts.js';
 import type { AirwallexClient } from '../../core/client.js';
 import type { Logger } from '../../core/log.js';
 import { round2 } from '../../core/money.js';
@@ -50,6 +51,27 @@ export interface Kit12Result {
  */
 export async function runKit12(client: AirwallexClient, logger: Logger): Promise<Kit12Result> {
   client.seedMockBalances({ ...CLOSING_CASH });
+  if (!client.isMock) {
+    await logger.step('Sandbox setup — fund the wallet to the scenario closing cash', async () => {
+      for (const currency of ['USD', 'EUR'] as const) {
+        const target = CLOSING_CASH[currency];
+        const current = balanceOf(await getBalances(client), currency);
+        if (current + 0.01 < target) {
+          const account = await ensureGlobalAccount(client, currency);
+          await simulateDeposit(client, {
+            globalAccountId: account.id,
+            amount: round2(target - current),
+            payerName: 'Close scenario funding',
+          });
+          logger.detail(`${currency} funded`, `${round2(target - current)} to reach ${target}`);
+        } else if (current > target + 0.01) {
+          throw new Error(
+            `${currency} wallet ${current} is above the scenario closing cash ${target}; sweep it before running the close live.`,
+          );
+        }
+      }
+    });
+  }
 
   logger.chapter(`Zero-Day Close Agent — ${CLOSE_PERIOD.label}`);
   logger.info(

@@ -100,6 +100,7 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 - [x] `npm test` — 50 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, and effect assertions on all thirteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
+- [x] Live-verified kits 1–3 and 11–13 against the sandbox; kit 4 waits on native Payment Acceptance enablement, kits 5–10 on platform/Airi/merchant access (all asked for in `enablement-requests.md`)
 - [x] Live Kit 1 run recorded (~22s, real time, no credentials shown): [release video](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
 - [ ] Enablement emails sent — the consolidated draft is ready in `submission/ready-to-send-email.txt`; no mail client was configured on this machine, so paste it into Gmail (or another account) and send it to devhelp@airwallex.com
 - [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)

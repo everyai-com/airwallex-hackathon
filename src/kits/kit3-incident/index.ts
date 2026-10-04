@@ -3,6 +3,7 @@ import { createBeneficiary, getBeneficiarySchema, usLocalBeneficiary } from '../
 import {
   advanceTransferToPaid,
   createTransfer,
+  ensureTransferProcessing,
   getTransfer,
   simulateTransferTransition,
   waitForTerminalTransfer,
@@ -74,7 +75,12 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
   });
 
   await logger.step('Advance the transfer to SENT — an intermediate state, never final', async () => {
-    const sent = await simulateTransferTransition(client, original.id, { nextStatus: 'SENT' });
+    // Live sandbox transfers start SCHEDULED; nudge them to PROCESSING first.
+    const processing = await ensureTransferProcessing(client, original);
+    const sent =
+      processing.status === 'PROCESSING'
+        ? await simulateTransferTransition(client, original.id, { nextStatus: 'SENT' })
+        : processing;
     guard.updateStatus(incidentKey, original.id, 'SENT');
     logger.detail('Status', `${sent.status} (in flight)`);
     const lock = guard.canCreatePayment(incidentKey);
