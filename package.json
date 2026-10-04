@@ -17,6 +17,8 @@
     "kit6": "tsx src/cli.ts kit6",
     "kit7": "tsx src/cli.ts kit7",
     "kit8": "tsx src/cli.ts kit8",
+    "kit9": "tsx src/cli.ts kit9",
+    "kit10": "tsx src/cli.ts kit10",
     "all": "tsx src/cli.ts all",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"

@@ -8,6 +8,7 @@ export interface PaymentIntent {
   amount: number;
   currency: string;
   merchantOrderId?: string;
+  failureReason?: string;
 }
 
 export interface DisputeRecord {
@@ -31,6 +32,7 @@ function toPaymentIntent(item: unknown): PaymentIntent {
     amount: num(record.amount) ?? 0,
     currency: String(record.currency ?? ''),
     ...(str(record.merchant_order_id) ? { merchantOrderId: str(record.merchant_order_id) } : {}),
+    ...(str(record.failure_reason) ? { failureReason: str(record.failure_reason) } : {}),
   };
 }
 
@@ -81,30 +83,45 @@ export async function createPaymentIntent(
   }
 }
 
-/** Confirm with the sandbox test card 4035501000000008. */
+/**
+ * Confirm a payment intent. Cards use the sandbox test number 4035501000000008;
+ * Airi confirms with the shopper's saved one-click credential (enablement-gated).
+ * `simulateFailureReason` is sandbox-only: it forces a declined attempt so
+ * report-before-retry flows can be exercised deterministically.
+ */
 export async function confirmPaymentIntent(
   client: AirwallexClient,
   input: {
     intentId: string;
     requestId: string;
-    card: { number: string; expiryMonth: string; expiryYear: string; cvc: string; name: string };
+    card?: { number: string; expiryMonth: string; expiryYear: string; cvc: string; name: string };
+    airi?: { email: string };
+    simulateFailureReason?: string;
   },
 ): Promise<PaymentIntent> {
+  if (!input.card && !input.airi) {
+    throw new Error('confirmPaymentIntent needs a card or an Airi payment method.');
+  }
   const response = await client.request<unknown>(
     `/api/v1/pa/payment_intents/${input.intentId}/confirm`,
     {
       body: {
         request_id: input.requestId,
-        payment_method: {
-          type: 'card',
-          card: {
-            number: input.card.number,
-            expiry_month: input.card.expiryMonth,
-            expiry_year: input.card.expiryYear,
-            cvc: input.card.cvc,
-            name: input.card.name,
-          },
-        },
+        payment_method: input.card
+          ? {
+              type: 'card',
+              card: {
+                number: input.card.number,
+                expiry_month: input.card.expiryMonth,
+                expiry_year: input.card.expiryYear,
+                cvc: input.card.cvc,
+                name: input.card.name,
+              },
+            }
+          : { type: 'airi', airi: { email: input.airi!.email } },
+        ...(input.simulateFailureReason
+          ? { simulate_failure_reason: input.simulateFailureReason }
+          : {}),
       },
     },
   );

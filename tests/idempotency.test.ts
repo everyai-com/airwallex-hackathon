@@ -7,7 +7,7 @@ import {
   createFxConversion,
   createFxQuote,
 } from '../src/api/fx.js';
-import { createPaymentIntent } from '../src/api/payments.js';
+import { createPaymentIntent, confirmPaymentIntent } from '../src/api/payments.js';
 import { createTransfer } from '../src/api/transfers.js';
 import { AirwallexClient } from '../src/core/client.js';
 import { RequestIds } from '../src/core/ids.js';
@@ -91,4 +91,48 @@ test('a duplicated payment intent request resolves to the original', async () =>
   const first = await createPaymentIntent(client, input);
   const again = await createPaymentIntent(client, input);
   assert.equal(again.id, first.id);
+});
+
+test('a duplicated payment intent confirm is rejected and a success clears the failure', async () => {
+  const client = testClient();
+  const intent = await createPaymentIntent(client, {
+    requestId: 'intent-confirm-test-0001',
+    amount: 12,
+    currency: 'USD',
+    merchantOrderId: 'ORD-9003',
+  });
+  const card = {
+    number: '4035501000000008',
+    expiryMonth: '12',
+    expiryYear: '2027',
+    cvc: '123',
+    name: 'Sandbox Shopper',
+  };
+
+  const failed = await confirmPaymentIntent(client, {
+    intentId: intent.id,
+    requestId: 'confirm-idempotency-test-0001',
+    card,
+    simulateFailureReason: 'AUTHENTICATION_EXPIRED',
+  });
+  assert.equal(failed.status, 'FAILED');
+  assert.equal(failed.failureReason, 'AUTHENTICATION_EXPIRED');
+
+  await assert.rejects(
+    () =>
+      confirmPaymentIntent(client, {
+        intentId: intent.id,
+        requestId: 'confirm-idempotency-test-0001',
+        card,
+      }),
+    /already used/,
+  );
+
+  const succeeded = await confirmPaymentIntent(client, {
+    intentId: intent.id,
+    requestId: 'confirm-idempotency-test-0002',
+    card,
+  });
+  assert.equal(succeeded.status, 'SUCCEEDED');
+  assert.equal(succeeded.failureReason, undefined);
 });

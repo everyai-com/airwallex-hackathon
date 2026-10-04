@@ -12,6 +12,8 @@ import { runKit5 } from './kits/kit5-platform-spend/index.js';
 import { runKit6 } from './kits/kit6-payroll/index.js';
 import { runKit7 } from './kits/kit7-lending/index.js';
 import { runKit8 } from './kits/kit8-marketplace/index.js';
+import { runKit9 } from './kits/kit9-shopping/index.js';
+import { runKit10 } from './kits/kit10-checkout/index.js';
 import { runSetup } from './setup.js';
 
 const USAGE = `
@@ -28,10 +30,13 @@ Usage:
   npm run kit6                 Multi-Employer Payroll Executor (connected accounts)
   npm run kit7                 Portfolio Lending Agent         (connected accounts)
   npm run kit8                 Marketplace Settlement Agent    (connected accounts)
-  npm run all                  Run all eight kits against the same client
+  npm run kit9                 Approval-Bound Shopping Agent   (Airi checkout)
+  npm run kit10                Merchant-Enabled Agentic Checkout (merchant catalog)
+  npm run all                  Run all ten kits against the same client
 
-Kits 5-8 need platform access: email devhelp@airwallex.com with your sandbox email
-and Client ID. In mock mode they run without any credentials.
+Kits 5-8 need platform access, kit 9 needs Airi CLI access and kit 10 needs
+merchant-side Agentic Commerce: email devhelp@airwallex.com with your sandbox
+email and Client ID. In mock mode they all run without any credentials.
 
 Flags:
   --mock                       Use the in-memory sandbox simulator (no credentials)
@@ -106,6 +111,12 @@ async function main(): Promise<void> {
     case 'kit8':
       await runKit8(client, logger);
       break;
+    case 'kit9':
+      await runKit9(client, logger, { autoApprove });
+      break;
+    case 'kit10':
+      await runKit10(client, logger);
+      break;
     case 'all':
       await runKit1(client, logger, {
         autoApprove,
@@ -118,6 +129,8 @@ async function main(): Promise<void> {
       await runKit6(client, logger);
       await runKit7(client, logger);
       await runKit8(client, logger);
+      await runKit9(client, logger, { autoApprove });
+      await runKit10(client, logger);
       break;
     default:
       process.stdout.write(`${USAGE}\n`);

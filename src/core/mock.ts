@@ -107,6 +107,7 @@ export interface MockSnapshot {
   cards: MockCard[];
   disputes: MockDispute[];
   refunds: Record<string, unknown>[];
+  paymentIntents: Record<string, unknown>[];
 }
 
 export const MOCK_FX_RATES: Record<string, number> = {
@@ -227,6 +228,7 @@ export class MockTransport implements Transport {
       cards: copy(this.state.cards),
       disputes: copy(this.state.disputes),
       refunds: copy(this.state.refunds),
+      paymentIntents: copy([...this.state.paymentIntents.values()]),
     };
   }
 
@@ -705,10 +707,34 @@ export class MockTransport implements Transport {
     if (method === 'POST' && confirmMatch) {
       const intent = this.state.paymentIntents.get(confirmMatch[1]!);
       if (!intent) fail(404, 'not_found', 'Payment intent not found.');
-      const card = body.payment_method?.card as Record<string, string> | undefined;
-      if (!card?.number || !luhnValid(String(card.number))) {
-        fail(400, 'invalid_card_number', 'Card number failed validation.');
+      this.claimRequestId(String(body.request_id ?? ''), 'payment_intent_confirm');
+      const paymentMethod = (body.payment_method ?? {}) as Record<string, any>;
+      if (paymentMethod.type === 'airi') {
+        // Airi one-click: a saved credential; the simulator mirrors the flow
+        // that live calls need enablement for.
+        if (!paymentMethod.airi?.email) {
+          fail(400, 'field_required', 'payment_method.airi.email is required.');
+        }
+      } else {
+        const card = paymentMethod.card as Record<string, string> | undefined;
+        if (!card?.number || !luhnValid(String(card.number))) {
+          fail(400, 'invalid_card_number', 'Card number failed validation.');
+        }
       }
+      const simulatedFailure = body.simulate_failure_reason
+        ? String(body.simulate_failure_reason)
+        : undefined;
+      if (simulatedFailure) {
+        intent.status = 'FAILED';
+        intent.failure_reason = simulatedFailure;
+        intent.latest_payment_attempt = {
+          id: `att_${randomUUID().slice(0, 8)}`,
+          status: 'FAILED',
+          failure_reason: simulatedFailure,
+        };
+        return { status: 200, data: intent };
+      }
+      delete intent.failure_reason;
       intent.status = 'SUCCEEDED';
       intent.latest_payment_attempt = { id: `att_${randomUUID().slice(0, 8)}`, status: 'SETTLED' };
       return { status: 200, data: intent };

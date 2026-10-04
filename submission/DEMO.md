@@ -8,7 +8,7 @@ Every kit below is built around that, with the thresholds in code.
 
 ```sh
 npm install --include=dev        # note: NODE_ENV=production skips dev deps otherwise
-npx tsx src/cli.ts all --mock    # smoke-test all eight kits, no credentials
+npx tsx src/cli.ts all --mock    # smoke-test all ten kits, no credentials
 ```
 
 For the live flagship demo:
@@ -61,6 +61,14 @@ Talking points judges love:
   capital; tenant-isolated payroll with fees priced before conversion; repayments and a
   floor-bounded advance re-decided when a borrower underperforms; seller reserves
   recomputed on carrier-failure evidence and a refund shortfall recovered.
+- **Kit 9 (Approval-Bound Shopping):** the merchant feed backorders the approved listing —
+  product, merchant and total change, so the old approval is void and a fresh one is raised;
+  the Airi payment is declined once, a retry is refused until the result is reported, then
+  the retry succeeds. Approved total == executed total.
+- **Kit 10 (Merchant Agentic Checkout):** the search tool filters and pages; checkout is
+  idempotent by request_id; a stale price is refused (`price_changed`) and an expired session
+  is refused (`checkout_expired`); the revised checkout is paid with the sandbox card and a
+  retry returns the same order — never a second charge.
 
 ## 3. If asked "why is this safe / production-shaped?"
 
@@ -75,13 +83,13 @@ Talking points judges love:
 
 ## 4. Submission checklist
 
-- [ ] `npm run typecheck` clean
-- [ ] `npm test` — 29 passing tests (policy unit tests, idempotency, and effect assertions on all eight kits)
-- [ ] `npx tsx src/cli.ts all --mock` exits 0
+- [x] `npm run typecheck` clean
+- [x] `npm test` — 38 passing tests (policy unit tests, idempotency, commerce state machines, and effect assertions on all ten kits)
+- [x] `npx tsx src/cli.ts all --mock` exits 0
 - [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)
 - [ ] `.env` never committed; screen recording blurs credentials if shown
-- [ ] Repo link + one-paragraph summary: "eight agentic banking starter kits; the
+- [ ] Repo link + one-paragraph summary: "ten agentic banking starter kits; the
       recommended Treasury controller decides fund/convert/defer/escalate from a
       reserve floor and forecast confidence, with every threshold in code and every
       approval bound to what the approver saw."

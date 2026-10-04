@@ -2,7 +2,9 @@
 
 Everything you can claim, in one place. Kits 1–4 need nothing beyond a sandbox
 account; every other item is an enablement, a budget, or a partner credit that only
-Airwallex can grant — so this file contains the exact asks.
+Airwallex can grant — so this file contains the exact asks. Kits 9–10 are already
+built and run against in-process simulators, so these emails unlock live runs, not
+the build.
 
 **Fastest path:** fill `submission/.env.applications` (copy the example) and run
 `node submission/send-applications.mjs`. It opens each email as a **draft** in your
@@ -191,8 +193,8 @@ Thanks!
 | # | Item | Blocks | Status |
 | - | ---- | ------ | ------ |
 | 1 | Connected accounts + platform payments | Kits 5–8 live | email ready |
-| 2 | Airi CLI allowlist + card budget | Kit 9 | email ready (needs your Airi email) |
-| 3 | Merchant-side Agentic Commerce | Kit 10 | email ready |
+| 2 | Airi CLI allowlist + card budget | Kit 9 live | email ready (needs your Airi email); kit 9 built and running in mock mode |
+| 3 | Merchant-side Agentic Commerce | Kit 10 live | email ready; kit 10 built with an in-process merchant simulator |
 | 4 | Credit / partner-credit program | — | email ready |
 | 5 | Submission deadline + judging criteria | Submission | asked in email 1/4 |
 

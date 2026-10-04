@@ -1,9 +1,10 @@
-# Airwallex Developer Lab — Agentic Starter (Kits 1–8)
+# Airwallex Developer Lab — Agentic Starter (Kits 1–10)
 
 A TypeScript starter for the Airwallex sandbox hackathon, built around one rule:
-**the model reads, the code decides, the API moves the money.** Eight starter kits share a typed
-REST client, a platform/connected-account layer, a policy layer, an approval gate, and an
-in-memory sandbox simulator so every demo runs end to end with or without credentials.
+**the model reads, the code decides, the API moves the money.** Ten starter kits share a typed
+REST client, a platform/connected-account layer, a policy layer, an approval gate, an in-memory
+sandbox simulator, and a merchant Agentic Commerce simulator so every demo runs end to end with
+or without credentials.
 
 | Kit | Command | The decision |
 | --- | --- | --- |
@@ -15,11 +16,14 @@ in-memory sandbox simulator so every demo runs end to end with or without creden
 | 6. Multi-Employer Payroll Executor | `npm run kit6` | Run payroll per employer without using one employer's funds for another |
 | 7. Portfolio Lending Agent | `npm run kit7` | Collect revenue-based repayments and size an advance without breaching the reserve floor |
 | 8. Marketplace Settlement Agent | `npm run kit8` | Set seller reserves, pay net proceeds, and recompute one reserve when risk changes |
+| 9. Approval-Bound Shopping Agent | `npm run kit9` | Re-approve when product, merchant, total or fulfillment changes — and report every payment result to Airi before any retry |
+| 10. Merchant-Enabled Agentic Checkout | `npm run kit10` | Snapshot prices into checkout sessions, refuse stale charges, and return the same order on a retry |
 
 Kits 1–4 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
-platform payments), which Airwallex enables on request — see
-[`submission/enablement-requests.md`](submission/enablement-requests.md) for ready-to-send
-emails. Until access lands, kits 5–8 run fully in mock mode.
+platform payments), kit 9 needs **Airi CLI access** and kit 10 needs **merchant-side Agentic
+Commerce** — all enabled on request; see
+[`submission/enablement-requests.md`](submission/enablement-requests.md) for ready-to-send emails.
+Until access lands, kits 5–10 run fully in mock mode.
 
 For the demo script and the submission checklist, see [`submission/DEMO.md`](submission/DEMO.md).
 
@@ -71,9 +75,10 @@ npm run kit5        # needs platform access; use --mock meanwhile
 ```
 
 Kits 1–4 need no platform enablement and no connected accounts. Everything stays in the sandbox.
-Kits 5–8 need platform access: email [devhelp@airwallex.com](mailto:devhelp@airwallex.com) with
-your sandbox email and Client ID (template in `submission/enablement-requests.md`), then run them
-live with the same commands.
+Kits 5–8 need platform access, kit 9 needs Airi CLI access and kit 10 needs merchant-side Agentic
+Commerce: email [devhelp@airwallex.com](mailto:devhelp@airwallex.com) with your sandbox email and
+Client ID (templates in `submission/enablement-requests.md`), then run them live with the same
+commands. Until then they all run in mock mode.
 
 ## What each kit demonstrates
 
@@ -187,6 +192,39 @@ paid out net. A USD 1,600 refund recovery is charged back (balance checked first
 reconciles: payouts + reserves = owed, platform balance = unreleased reserves. A
 `SETTLEMENT_REPORT` platform report closes the cycle.
 
+### Kit 9 — Approval-Bound Shopping Agent (`src/kits/kit9-shopping`)
+
+A procurement mission — "highest rated espresso machine under USD 500 delivered by Friday" —
+searches the merchant catalog (`commerce-catalog.ts`, 106 deterministic listings). The agent
+prices every listing × fulfillment option and picks the Gaggia Classic Evo Pro from CremaCo: USD
+464 delivered, expedited in 2 days (the standard tier is rejected by the deadline; the Bambino
+Plus by the budget; the cheaper Dedica by rating). The approval is bound to a fingerprint of
+**product + merchant + total + fulfillment** and recorded with its evidence.
+
+Then the merchant feed contradicts the choice: CremaCo's listing is backordered. The agent
+re-plans to the same machine from RoastWorks at USD 484 — the fingerprint changes in three
+dimensions (product, merchant, total), so the old approval cannot cover it and the gate raises a
+**fresh approval**. The checkout then snapshots the price, and the agent verifies the checkout
+total equals the approved total before paying with Airi one-click.
+
+The Airi CLI contract is enforced in code (`AiriReportGuard`): the first attempt is declined with
+`AUTHENTICATION_EXPIRED`; a retry is **refused until the failure is reported to Airi**; after the
+report, a second attempt with a new `request_id` succeeds and the order (`MO-2026-····`) is
+returned. The closing ledger shows both approvals, both reports, and that the approved total
+equals the executed total.
+
+### Kit 10 — Merchant-Enabled Agentic Checkout (`src/kits/kit10-checkout`)
+
+The merchant side of the same rails: load the catalog, expose the product-search tool (text
+tokens plus category/price/stock filters and deterministic pagination), and take an agent through
+checkout. The checkout snapshots prices at creation and is idempotent by `request_id` — asking
+twice returns the same session, never a second cart. When the supplier price moves after the
+snapshot, completion is refused with `price_changed` and a revised checkout is issued; a session
+created with `ttl 0` is refused with `checkout_expired` and flipped to `EXPIRED`. The revised
+session is paid on the hosted test page (sandbox card `4035501000000008`), producing an order with
+a merchant order number; repeating the completion with the same `request_id` returns that same
+order — the retry contract never creates a second charge (one payment intent, one order).
+
 ## Architecture
 
 ```
@@ -204,10 +242,12 @@ src/
     money.ts, parse.ts, log.ts
   api/                      balances, global accounts + deposits, fx, beneficiaries, transfers,
                             issuing, payments/disputes, files, accounts, platform money movement
-  kits/                     kit1-treasury … kit8-marketplace, shared.ts, platform-shared.ts
+  kits/                     kit1-treasury … kit10-checkout, shared.ts, platform-shared.ts,
+                            commerce-catalog.ts (merchant catalog + search),
+                            commerce-merchant.ts (hosted checkout + order/Airi contract)
   setup.ts                  Global Account + simulated deposit
   cli.ts                    command dispatch
-tests/                      policy unit tests + mock end-to-end runs of all eight kits
+tests/                      policy unit tests + mock end-to-end runs of all ten kits
 submission/                 enablement email templates + demo script + checklist
 ```
 
@@ -227,6 +267,12 @@ submission/                 enablement email templates + demo script + checklist
 - **Live payments are idempotent across restarts**: request ids persist under `.data/`, so a
   crash-and-rerun reuses them, the sandbox rejects the duplicate, and the lookup helpers return the
   original transfer/conversion/intent. `--fresh` rotates them deliberately.
+- **Purchases are approval-bound**: an approval covers product + merchant + total + fulfillment,
+  and a material change voids it in code (`kit9-shopping/policy.ts`).
+- **Airi retries require the previous result to be reported first**; the report-before-retry guard
+  refuses otherwise.
+- **Merchant checkouts snapshot prices, expire after an hour, and replay orders by `request_id`**,
+  so a stale price is refused and a retry returns the same order instead of a second charge.
 - **Duplicate locks and tenant isolation live in code**, never in prompts.
 - Sandbox simulation calls sit behind the shared `api/` functions, so the decision logic never
   calls a simulator directly and live calls can replace mock ones one function at a time.
@@ -234,7 +280,8 @@ submission/                 enablement email templates + demo script + checklist
 ### REST vs MCP
 
 This project calls REST directly (the developer MCP cannot send `x-on-behalf-of`, which kits 5–8
-need, and MCP has no FX conversion tool). If your agent has the docs MCP at
+need, and MCP has no FX conversion tool); kits 9–10 keep the merchant Agentic Commerce surface in
+an in-process simulator until that access lands. If your agent has the docs MCP at
 `https://mcp.sandbox.airwallex.com/docs` connected, use it to check exact payload fields before
 live runs. FX conversions, beneficiary validation, dispute challenges and all simulation calls are
 REST here on purpose.
@@ -243,7 +290,7 @@ REST here on purpose.
 
 ```sh
 npm run typecheck
-npm test          # node:test — policy unit tests + all eight kits end to end in mock mode
+npm test          # node:test — policy unit tests + all ten kits end to end in mock mode
 ```
 
 ## Extending
@@ -253,9 +300,9 @@ npm test          # node:test — policy unit tests + all eight kits end to end 
 - Swap the mock transport for live by removing `MOCK` (or pass `--live`).
 - Add a kit by copying the `policy.ts` + `planner.ts` split: keep money math pure and testable,
   keep approvals bound, and let only the `index.ts` orchestrator make API calls.
-- Kit 9 (Approval-Bound Shopping Agent) needs Airi CLI access — request it with the template in
-  `submission/enablement-requests.md`. Kit 10 (Merchant-Enabled Agentic Checkout) needs
-  merchant-side Agentic Commerce access; the same file has that request too.
+- Kits 9–10 are built mock-first like 5–8: their merchant Agentic Commerce surface is simulated
+  in-process (`commerce-catalog.ts`, `commerce-merchant.ts`) until Airi CLI and merchant access
+  land — both request templates are in `submission/enablement-requests.md`.
 - A reusable starting point for platform kits: `src/kits/platform-shared.ts` (`openConnectedAccount`,
   `fundCustomerWallet`) and `src/api/platform.ts` (`connectedAccountTransfer`, `collectCharge`,
   `createPlatformReport`).
