@@ -126,14 +126,14 @@ export async function ensureTransferProcessing(
   options: { onBehalfOf?: string } = {},
 ): Promise<TransferRecord> {
   let current = transfer;
-  for (let attempt = 0; attempt < 6 && current.status === 'SCHEDULED'; attempt += 1) {
+  for (let attempt = 0; attempt < 15 && current.status === 'SCHEDULED'; attempt += 1) {
     try {
       current = await simulateTransferTransition(client, current.id, {
         nextStatus: 'PROCESSING',
         ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
       });
     } catch {
-      await sleep(900);
+      await sleep(1000);
       current = await getTransfer(client, current.id, options);
     }
   }

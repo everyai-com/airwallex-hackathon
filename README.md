@@ -30,7 +30,7 @@ Until access lands, kits 5–10 run fully in mock mode.
 
 For the official challenge mapping — reconciliation, treasury, collections, payouts, spend policy,
 close — see [`submission/CHALLENGE.md`](submission/CHALLENGE.md). Recorded live sandbox runs —
-Kit 1 treasury and Kit 11 reconciliation, real time, no mock — are attached to the repo's
+kits 1, 2, 3, 11, 12 and 13, real time, no mock — are attached to the repo's
 [releases](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04).
 
 For the demo script and the submission checklist, see [`submission/DEMO.md`](submission/DEMO.md).

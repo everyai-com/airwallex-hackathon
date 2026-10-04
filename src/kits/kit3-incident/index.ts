@@ -66,6 +66,19 @@ export async function runKit3(client: AirwallexClient, logger: Logger): Promise<
     beneficiaryId: beneficiary.id,
   });
   logger.detail('Original transfer', `${original.id} status ${original.status} request_id ${original.requestId}`);
+
+  if (original.status === 'CANCELLED' || original.status === 'PAID') {
+    // A live re-run reuses the persisted request id, so the sandbox returns the
+    // original transfer — already terminal from a previous run. Never replay it.
+    logger.chapter('Resumed incident');
+    logger.detail(
+      'Original transfer',
+      `${original.id} is ${original.status} — this incident was already executed on a previous run; nothing is re-paid.`,
+    );
+    logger.info('Run with --fresh to rotate request ids and replay the incident from scratch.');
+    return;
+  }
+
   guard.record(incidentKey, {
     transferId: original.id,
     requestId: original.requestId,

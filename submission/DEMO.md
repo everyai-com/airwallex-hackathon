@@ -101,7 +101,7 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
 - [x] Live-verified kits 1–3 and 11–13 against the sandbox; kit 4 waits on native Payment Acceptance enablement, kits 5–10 on platform/Airi/merchant access (all asked for in `enablement-requests.md`)
-- [x] Live Kit 1 (~22s) and Kit 11 (~18s) runs recorded in real time, no credentials shown: [release videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
+- [x] Live runs recorded for kits 1, 2, 3, 11, 12 and 13 (real time, no credentials shown): [release videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
 - [x] Enablement emails sent — the consolidated email to devhelp@airwallex.com went out from Gmail on 2026-10-04 (platform access, native Payment Acceptance, Airi CLI, merchant Agentic Commerce, credits, submission details)
 - [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)
 - [x] Recording shows no credentials (terminal text only)

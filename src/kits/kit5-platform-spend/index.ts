@@ -67,8 +67,10 @@ export async function runKit5(client: AirwallexClient, logger: Logger): Promise<
       const accountId = accountIds.get(key)!;
       const [firstName, lastName] = customer.contact.split(' ');
       const cardholder = await createCardholder(client, {
-        requestId: ids.forOperation(`cardholder-${key}`),
-        email: `${key}@example.com`,
+        // Fresh per run: live re-runs create new cardholders and cards.
+        requestId: ids.fresh(),
+        // The live sandbox rejects a reused cardholder email, so tag each run.
+        email: `${key}.${Date.now().toString(36)}@example.com`,
         firstName: firstName ?? 'Sandbox',
         lastName: lastName ?? 'Owner',
         dateOfBirth: '1988-06-15',
@@ -85,7 +87,7 @@ export async function runKit5(client: AirwallexClient, logger: Logger): Promise<
         onBehalfOf: accountId,
       });
       const card = await createCard(client, {
-        requestId: ids.forOperation(`card-${key}`),
+        requestId: ids.fresh(),
         cardholderId: ready.cardholderId,
         createdBy: customer.contact,
         limitCurrency: 'USD',

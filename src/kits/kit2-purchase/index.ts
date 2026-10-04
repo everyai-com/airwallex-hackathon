@@ -83,8 +83,11 @@ export async function runKit2(client: AirwallexClient, logger: Logger): Promise<
   let cardId = '';
   await logger.step('Issue a virtual card whose controls encode the monthly decision', async () => {
     const cardholder = await createCardholder(client, {
-      requestId: ids.forOperation('cardholder'),
-      email: 'finance@acme-demo.example',
+      // Fresh per run: a live re-run creates a new cardholder, and the old
+      // request_id would be rejected as already used.
+      requestId: ids.fresh(),
+      // The live sandbox rejects a reused cardholder email, so tag each run.
+      email: `finance.${Date.now().toString(36)}@acme-demo.example`,
       firstName: 'Dana',
       lastName: 'Reed',
       dateOfBirth: '1991-04-12',
@@ -100,7 +103,7 @@ export async function runKit2(client: AirwallexClient, logger: Logger): Promise<
     logger.detail('Cardholder', `${ready.cardholderId} (${ready.status})`);
 
     const card = await createCard(client, {
-      requestId: ids.forOperation('card'),
+      requestId: ids.fresh(),
       cardholderId: ready.cardholderId,
       createdBy: 'Dana Reed',
       limitCurrency: 'USD',
