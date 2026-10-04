@@ -88,5 +88,6 @@ Talking points judges love:
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)
-- [ ] `.env` never committed; screen recording blurs credentials if shown
+- [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)
+- [ ] Screen recording blurs credentials if shown
 - [x] Repo link + one-paragraph summary: [github.com/everyai-com/airwallex-hackathon](https://github.com/everyai-com/airwallex-hackathon) — summary in `submission/SUMMARY.md`
