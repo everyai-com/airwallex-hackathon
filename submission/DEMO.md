@@ -89,7 +89,4 @@ Talking points judges love:
 - [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)
 - [ ] `.env` never committed; screen recording blurs credentials if shown
-- [ ] Repo link + one-paragraph summary: "ten agentic banking starter kits; the
-      recommended Treasury controller decides fund/convert/defer/escalate from a
-      reserve floor and forecast confidence, with every threshold in code and every
-      approval bound to what the approver saw."
+- [x] Repo link + one-paragraph summary: [github.com/everyai-com/airwallex-hackathon](https://github.com/everyai-com/airwallex-hackathon) — summary in `submission/SUMMARY.md`
