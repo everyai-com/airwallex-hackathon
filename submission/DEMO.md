@@ -8,7 +8,7 @@ Every kit below is built around that, with the thresholds in code.
 
 ```sh
 npm install                      # dev deps included via .npmrc (NODE_ENV=production safe)
-npx tsx src/cli.ts all --mock    # smoke-test all ten kits, no credentials
+npx tsx src/cli.ts all --mock    # smoke-test all thirteen kits, no credentials
 ```
 
 For the live flagship demo:
@@ -69,6 +69,19 @@ Talking points judges love:
   idempotent by request_id; a stale price is refused (`price_changed`) and an expired session
   is refused (`checkout_expired`); the revised checkout is paid with the sandbox card and a
   retry returns the same order — never a second charge.
+- **Kit 11 (Reconciliation — receive-money flagship):** `npm run kit11`. Eight receipts, eight
+  decisions: exact, deduction beyond tolerance (analyst-read credit note → bound approval),
+  partial, unreferenced, duplicate held, overpayment credited, unmatched held. Closes with both
+  identities proven in code: AR and cash.
+- **Kit 12 (Close):** `npm run kit12`. A 16:40 wire books, a 17:05 wire defers, EUR revalues for
+  an USD 86.80 loss, accruals post, and the close verdict prints only after a balanced trial
+  balance and a per-currency cash tie-out.
+- **Kit 13 (Collections):** `npm run kit13`. Reminder / firm notice / payment plan / approved
+  escalation / small-balance write-off per invoice; a 7-day cooldown; then Cascade accepts a plan
+  (40% now) and the first payment lands for real.
+
+The full domain map is in [`submission/CHALLENGE.md`](CHALLENGE.md): every official challenge
+domain — reconciliation, treasury, collections, payouts, spend policy, close — has a kit.
 
 ## 3. If asked "why is this safe / production-shaped?"
 
@@ -84,7 +97,7 @@ Talking points judges love:
 ## 4. Submission checklist
 
 - [x] `npm run typecheck` clean
-- [x] `npm test` — 38 passing tests (policy unit tests, idempotency, commerce state machines, and effect assertions on all ten kits)
+- [x] `npm test` — 48 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, and effect assertions on all thirteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)

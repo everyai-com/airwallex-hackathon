@@ -14,6 +14,9 @@ import { runKit7 } from './kits/kit7-lending/index.js';
 import { runKit8 } from './kits/kit8-marketplace/index.js';
 import { runKit9 } from './kits/kit9-shopping/index.js';
 import { runKit10 } from './kits/kit10-checkout/index.js';
+import { runKit11 } from './kits/kit11-reconciliation/index.js';
+import { runKit12 } from './kits/kit12-close/index.js';
+import { runKit13 } from './kits/kit13-collections/index.js';
 import { runSetup } from './setup.js';
 
 const USAGE = `
@@ -32,7 +35,10 @@ Usage:
   npm run kit8                 Marketplace Settlement Agent    (connected accounts)
   npm run kit9                 Approval-Bound Shopping Agent   (Airi checkout)
   npm run kit10                Merchant-Enabled Agentic Checkout (merchant catalog)
-  npm run all                  Run all ten kits against the same client
+  npm run kit11                Invoice-Matching Reconciliation Agent
+  npm run kit12                Zero-Day Close Agent
+  npm run kit13                AR Collections Agent
+  npm run all                  Run all kits against the same client
 
 Kits 5-8 need platform access, kit 9 needs Airi CLI access and kit 10 needs
 merchant-side Agentic Commerce: email devhelp@airwallex.com with your sandbox
@@ -117,6 +123,21 @@ async function main(): Promise<void> {
     case 'kit10':
       await runKit10(client, logger);
       break;
+    case 'kit11':
+      await runKit11(client, logger, {
+        autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
+      break;
+    case 'kit12':
+      await runKit12(client, logger);
+      break;
+    case 'kit13':
+      await runKit13(client, logger, {
+        autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
+      break;
     case 'all':
       await runKit1(client, logger, {
         autoApprove,
@@ -131,6 +152,15 @@ async function main(): Promise<void> {
       await runKit8(client, logger);
       await runKit9(client, logger, { autoApprove });
       await runKit10(client, logger);
+      await runKit11(client, logger, {
+        autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
+      await runKit12(client, logger);
+      await runKit13(client, logger, {
+        autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
       break;
     default:
       process.stdout.write(`${USAGE}\n`);

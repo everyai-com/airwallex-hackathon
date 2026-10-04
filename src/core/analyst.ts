@@ -40,9 +40,32 @@ export interface ExceptionInput {
   reason: string;
 }
 
+export interface RemittanceInput {
+  customer: string;
+  amount: number;
+  currency: string;
+  reference?: string;
+  /** The raw remittance advice — an email body, a bank narrative, a PDF caption. */
+  email: string;
+}
+
+/**
+ * What the model may read from an unstructured remittance advice: which
+ * invoices it references and whether it claims a discount or a credit.
+ * It never decides the match or the money; the reconciliation policy does.
+ */
+export interface RemittanceReading {
+  invoiceRefs: string[];
+  mentionsDiscount: boolean;
+  mentionsCredit: boolean;
+  rationale: string;
+  citedEvidence: string[];
+}
+
 export interface Analyst {
   readonly kind: 'claude' | 'heuristic';
   assessForecast(input: ForecastInput): Promise<ForecastAssessment>;
+  readRemittance(input: RemittanceInput): Promise<RemittanceReading>;
   explainException(input: ExceptionInput): Promise<string>;
 }
 
@@ -125,7 +148,34 @@ export class HeuristicAnalyst implements Analyst {
   }
 
   async explainException(input: ExceptionInput): Promise<string> {
-    return `${input.counterparty} is held for human review: ${input.reason}. No money moves until a person clears it — the pending amount is ${input.currency} ${input.amount}.`;
+    const reason = input.reason.trim().replace(/\.+$/, '');
+    return `${input.counterparty} is held for human review: ${reason}. No money moves until a person clears it — the pending amount is ${input.currency} ${input.amount}.`;
+  }
+
+  async readRemittance(input: RemittanceInput): Promise<RemittanceReading> {
+    const refs = [
+      ...new Set((input.email.match(/\b[A-Z]{2,4}-\d{3,}\b/gi) ?? []).map((ref) => ref.toUpperCase())),
+    ];
+    const mentionsDiscount = /discount/i.test(input.email);
+    const mentionsCredit = /credit note|credit for|credit of|deduct|short-?paid/i.test(input.email);
+    const citedEvidence = sentences(input.email)
+      .filter(
+        (sentence) =>
+          /\b[A-Z]{2,4}-\d{3,}\b/i.test(sentence) ||
+          /discount|credit note|deduct|short-?paid/i.test(sentence),
+      )
+      .slice(0, 4)
+      .map((sentence) => (sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence));
+
+    return {
+      invoiceRefs: refs,
+      mentionsDiscount,
+      mentionsCredit,
+      rationale: refs.length
+        ? `The remittance advice references ${refs.join(', ')}${mentionsCredit ? ' and claims a credit/deduction' : ''}${mentionsDiscount ? ' and mentions a discount' : ''}. The code decides the match.`
+        : 'The remittance advice carries no invoice reference; the code must match by payer and amount.',
+      citedEvidence,
+    };
   }
 }
 
@@ -204,6 +254,56 @@ export class ClaudeAnalyst implements Analyst {
       };
     } catch (error) {
       const fallback = await this.fallback.assessForecast(input);
+      return {
+        ...fallback,
+        rationale: `${fallback.rationale} (Claude analyst unavailable: ${(error as Error).message}; heuristic fallback used.)`,
+      };
+    }
+  }
+
+  async readRemittance(input: RemittanceInput): Promise<RemittanceReading> {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.options.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.model,
+          max_tokens: 400,
+          system: `You read a customer remittance advice for a receivables agent.
+Return ONLY JSON: {"invoice_refs":["INV-1234", ...],"mentions_discount":true|false,"mentions_credit":true|false,"rationale":"1-2 sentences","cited_evidence":["verbatim quote", ...]}.
+Extract only invoice references and whether the text claims a discount or a credit/deduction. Never invent invoice numbers or amounts.`,
+          messages: [{ role: 'user', content: JSON.stringify(input) }],
+        }),
+      });
+      if (!response.ok) throw new Error(`Anthropic API responded ${response.status}`);
+      const payload = (await response.json()) as {
+        content?: Array<{ type: string; text?: string }>;
+      };
+      const text = payload.content?.find((block) => block.type === 'text')?.text ?? '';
+      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as {
+        invoice_refs?: unknown;
+        mentions_discount?: unknown;
+        mentions_credit?: unknown;
+        rationale?: unknown;
+        cited_evidence?: unknown;
+      };
+      return {
+        invoiceRefs: Array.isArray(json.invoice_refs)
+          ? [...new Set(json.invoice_refs.map((ref) => String(ref).toUpperCase()))].slice(0, 8)
+          : [],
+        mentionsDiscount: json.mentions_discount === true,
+        mentionsCredit: json.mentions_credit === true,
+        rationale: String(json.rationale ?? '').slice(0, 600),
+        citedEvidence: Array.isArray(json.cited_evidence)
+          ? json.cited_evidence.map((item) => String(item)).slice(0, 5)
+          : [],
+      };
+    } catch (error) {
+      const fallback = await this.fallback.readRemittance(input);
       return {
         ...fallback,
         rationale: `${fallback.rationale} (Claude analyst unavailable: ${(error as Error).message}; heuristic fallback used.)`,

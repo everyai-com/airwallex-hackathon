@@ -1,10 +1,10 @@
-# Airwallex Developer Lab — Agentic Starter (Kits 1–10)
+# Airwallex Developer Lab — Agentic Starter (Kits 1–13)
 
 A TypeScript starter for the Airwallex sandbox hackathon, built around one rule:
-**the model reads, the code decides, the API moves the money.** Ten starter kits share a typed
+**the model reads, the code decides, the API moves the money.** Thirteen starter kits share a typed
 REST client, a platform/connected-account layer, a policy layer, an approval gate, an in-memory
-sandbox simulator, and a merchant Agentic Commerce simulator so every demo runs end to end with
-or without credentials.
+sandbox simulator, and merchant Agentic Commerce + finance-ops simulators so every demo runs end
+to end with or without credentials.
 
 | Kit | Command | The decision |
 | --- | --- | --- |
@@ -18,12 +18,18 @@ or without credentials.
 | 8. Marketplace Settlement Agent | `npm run kit8` | Set seller reserves, pay net proceeds, and recompute one reserve when risk changes |
 | 9. Approval-Bound Shopping Agent | `npm run kit9` | Re-approve when product, merchant, total or fulfillment changes — and report every payment result to Airi before any retry |
 | 10. Merchant-Enabled Agentic Checkout | `npm run kit10` | Snapshot prices into checkout sessions, refuse stale charges, and return the same order on a retry |
+| 11. Invoice-Matching Reconciliation Agent | `npm run kit11` | Match every receipt to its invoice — exact, deduction, partial, overpayment, duplicate, unmatched — and prove the AR and cash identities |
+| 12. Zero-Day Close Agent | `npm run kit12` | Cutoff, revaluation and accrual calls, a balanced double-entry journal, and a trial balance tied to the wallet |
+| 13. AR Collections Agent | `npm run kit13` | Proportionate pressure per overdue invoice — reminder, plan, escalation, write-off — decided from aging, history and risk |
 
-Kits 1–4 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
+Kits 1–4 and 11–13 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
 platform payments), kit 9 needs **Airi CLI access** and kit 10 needs **merchant-side Agentic
 Commerce** — all enabled on request; see
 [`submission/enablement-requests.md`](submission/enablement-requests.md) for ready-to-send emails.
 Until access lands, kits 5–10 run fully in mock mode.
+
+For the official challenge mapping — reconciliation, treasury, collections, payouts, spend policy,
+close — see [`submission/CHALLENGE.md`](submission/CHALLENGE.md).
 
 For the demo script and the submission checklist, see [`submission/DEMO.md`](submission/DEMO.md).
 
@@ -225,6 +231,48 @@ session is paid on the hosted test page (sandbox card `4035501000000008`), produ
 a merchant order number; repeating the completion with the same `request_id` returns that same
 order — the retry contract never creates a second charge (one payment intent, one order).
 
+### Kit 11 — Invoice-Matching Reconciliation Agent (`src/kits/kit11-reconciliation`)
+
+The receive-money loop the challenge opens with. Eight bank-feed receipts land against an open AR
+book of USD 43,500 and EUR 26,000, and the agent matches every one:
+
+- **Exact** — a wire referencing INV-1042 is applied in full.
+- **Deduction** — Datawise short-pays by USD 120. The analyst reads the remittance advice
+  (`readRemittance`), extracts the invoice reference and flags the claimed credit note; the
+  tolerance policy computes `max(USD 25, 2%)` = USD 85, so the USD 120 deduction needs a bound
+  human approval before it is written off.
+- **Partial** — Northwind pays USD 5,500 of INV-1041; USD 2,900 stays open.
+- **Unreferenced** — a bare wire from Bluepeak matches one invoice by payer + exact amount.
+- **Duplicate** — the same Northwind wire arrives twice; the second is held as unapplied cash,
+  never applied twice.
+- **Overpayment** — Cascade's USD 10,400 settles INV-1047 with USD 500 left as customer credit.
+- **Unmatched** — USD 3,400 from a new payer matches nothing; held with a person to ask.
+
+The closing chapter proves two identities in code and fails the run if either breaks:
+`opening = applied + written off + still open` and `wallet = starting cash + applied + credits +
+unapplied`. Nothing is written off, credited or held without a threshold saying so.
+
+### Kit 12 — Zero-Day Close Agent (`src/kits/kit12-close`)
+
+The close kit keeps a real mini-ledger (`ledger.ts`: every journal entry must balance before it
+can be posted, and the trial balance is the proof). It decides the period-end calls — a wire at
+16:40 books to this period, one at 17:05 defers — revalues the EUR position from the book rate
+(1.09) to the closing rate (1.0869) for an USD 86.80 presentation loss, posts the prepaid and
+payroll accruals, and closes with a balanced 13-account trial balance whose cash ties out to the
+wallet per currency. Verdict: **CLOSED** (zero-day), with the deferred wire and unapplied cash
+assigned as next-period follow-ups.
+
+### Kit 13 — AR Collections Agent (`src/kits/kit13-collections`)
+
+The overdue book as of 2026-11-05: six open invoices plus one forgotten USD 60 balance. The agent
+decides proportionate pressure per invoice — a friendly reminder for good payers, a firm notice
+before escalation, a payment plan for customers who keep promises, one escalation for a
+high-risk repeat offender (bound approval + analyst-written note), and an autonomous small-balance
+write-off because chasing costs more than the balance. A 7-day cooldown stops a second chase on a
+customers contacted two days ago. Then new information: Cascade replies offering 40% now and the
+balance in three weeks — the plan policy accepts it (floor 30%, max 30 days), the first USD 3,960
+really lands, and the book reconciles: `opening = recovered + written off + still open`.
+
 ## Architecture
 
 ```
@@ -239,15 +287,18 @@ src/
     ids.ts                  one stable request_id per operation
     approvals.ts            approval gate bound to amount/currency/counterparty/evidence
     analyst.ts              the "model reads" layer: Claude or deterministic heuristic
+                            (forecast confidence, remittance reading, escalation notes)
     money.ts, parse.ts, log.ts
   api/                      balances, global accounts + deposits, fx, beneficiaries, transfers,
                             issuing, payments/disputes, files, accounts, platform money movement
-  kits/                     kit1-treasury … kit10-checkout, shared.ts, platform-shared.ts,
+  kits/                     kit1-treasury … kit13-collections, shared.ts, platform-shared.ts,
                             commerce-catalog.ts (merchant catalog + search),
-                            commerce-merchant.ts (hosted checkout + order/Airi contract)
+                            commerce-merchant.ts (hosted checkout + order/Airi contract),
+                            billing-shared.ts (receivables book + aging),
+                            kit12-close/ledger.ts (double-entry journal + trial balance)
   setup.ts                  Global Account + simulated deposit
   cli.ts                    command dispatch
-tests/                      policy unit tests + mock end-to-end runs of all ten kits
+tests/                      policy unit tests + mock end-to-end runs of all thirteen kits
 submission/                 enablement email templates + demo script + checklist
 ```
 
@@ -273,6 +324,11 @@ submission/                 enablement email templates + demo script + checklist
   refuses otherwise.
 - **Merchant checkouts snapshot prices, expire after an hour, and replay orders by `request_id`**,
   so a stale price is refused and a retry returns the same order instead of a second charge.
+- **Receivables rules live in code**: deductions clear autonomously only within a
+  `max(USD 25, 2%)` tolerance, duplicates are held as unapplied cash, unmatched receipts over
+  USD 1,000 need a person, and the AR and cash identities must close or the run fails.
+- **The close proves itself**: every journal entry must balance before posting, and the trial
+  balance and per-currency cash tie-out run before the close verdict is printed.
 - **Duplicate locks and tenant isolation live in code**, never in prompts.
 - Sandbox simulation calls sit behind the shared `api/` functions, so the decision logic never
   calls a simulator directly and live calls can replace mock ones one function at a time.
@@ -290,7 +346,7 @@ REST here on purpose.
 
 ```sh
 npm run typecheck
-npm test          # node:test — policy unit tests + all ten kits end to end in mock mode
+npm test          # node:test — policy unit tests + all thirteen kits end to end in mock mode
 ```
 
 ## Extending
@@ -303,6 +359,9 @@ npm test          # node:test — policy unit tests + all ten kits end to end in
 - Kits 9–10 are built mock-first like 5–8: their merchant Agentic Commerce surface is simulated
   in-process (`commerce-catalog.ts`, `commerce-merchant.ts`) until Airi CLI and merchant access
   land — both request templates are in `submission/enablement-requests.md`.
+- Kits 11–13 need no new enablement: they run live on a plain sandbox account and mock-first
+  everywhere else (`billing-shared.ts` holds the receivables book; `submission/CHALLENGE.md`
+  maps every challenge domain to a kit).
 - A reusable starting point for platform kits: `src/kits/platform-shared.ts` (`openConnectedAccount`,
   `fundCustomerWallet`) and `src/api/platform.ts` (`connectedAccountTransfer`, `collectCharge`,
   `createPlatformReport`).

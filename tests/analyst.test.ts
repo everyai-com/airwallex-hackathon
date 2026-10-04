@@ -63,3 +63,31 @@ test('exception explanations name the counterparty and the amount held', async (
   assert.match(note, /USD 3500/);
   assert.match(note, /human review/);
 });
+
+test('analyst reads invoice references and deduction claims from remittance advice', async () => {
+  const analyst = createAnalyst({ forceHeuristic: true });
+  const reading = await analyst.readRemittance({
+    customer: 'Datawise Inc',
+    amount: 4_130,
+    currency: 'USD',
+    reference: 'INV-1044 less agreed deductions',
+    email:
+      "We've wired USD 4,130 for INV-1044: the invoice total less the USD 120 credit note CR-88, taking the early-payment discount we agreed.",
+  });
+  assert.deepEqual(reading.invoiceRefs, ['INV-1044']);
+  assert.equal(reading.mentionsCredit, true);
+  assert.equal(reading.mentionsDiscount, true);
+  assert.ok(reading.citedEvidence.some((line) => line.includes('INV-1044')));
+});
+
+test('analyst reports no references when the remittance advice has none', async () => {
+  const analyst = createAnalyst({ forceHeuristic: true });
+  const reading = await analyst.readRemittance({
+    customer: 'Vela Studio',
+    amount: 3_400,
+    currency: 'USD',
+    email: 'Here is the payment we discussed. Thanks!',
+  });
+  assert.deepEqual(reading.invoiceRefs, []);
+  assert.match(reading.rationale, /no invoice reference/i);
+});
