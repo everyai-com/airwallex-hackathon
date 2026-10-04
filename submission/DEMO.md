@@ -7,7 +7,7 @@ Every kit below is built around that, with the thresholds in code.
 ## 0. Setup (2 minutes)
 
 ```sh
-npm install --include=dev        # note: NODE_ENV=production skips dev deps otherwise
+npm install                      # dev deps included via .npmrc (NODE_ENV=production safe)
 npx tsx src/cli.ts all --mock    # smoke-test all ten kits, no credentials
 ```
 
