@@ -346,6 +346,9 @@ export class MockTransport implements Transport {
     }
 
     if (method === 'POST' && path === '/api/v1/fx/quotes/create') {
+      if (!body.validity) {
+        fail(400, 'field_required', 'field [validity] is required (live).');
+      }
       const sell = String(body.sell_currency);
       const buy = String(body.buy_currency);
       const spot = rateFor(buy, sell);
@@ -470,6 +473,9 @@ export class MockTransport implements Transport {
       }
       if (!body.reason || !body.reference) {
         fail(400, '001', 'reason and reference are required.');
+      }
+      if (!body.source_currency) {
+        fail(400, 'validation_failed', 'source_currency is required (001 on live).');
       }
       const method = String(body.transfer_method ?? 'LOCAL');
       const fee = method === 'SWIFT' && currency === 'EUR' ? SWIFT_FEE_EUR : 0;

@@ -70,9 +70,11 @@ export async function createTransfer(
         transfer_method: input.transferMethod,
         reason: input.reason,
         reference: input.reference,
+        // The live schema requires source_currency; our scenarios fund a
+        // transfer from its own currency wallet unless told otherwise.
+        source_currency: input.sourceCurrency ?? input.transferCurrency,
         ...(input.beneficiaryId ? { beneficiary_id: input.beneficiaryId } : {}),
         ...(input.beneficiary ? { beneficiary: input.beneficiary } : {}),
-        ...(input.sourceCurrency ? { source_currency: input.sourceCurrency } : {}),
       },
       ...(input.onBehalfOf ? { onBehalfOf: input.onBehalfOf } : {}),
     });
@@ -132,6 +134,22 @@ export async function advanceTransferToPaid(
     );
   }
 
+  if (current.status === 'SCHEDULED') {
+    // Live sandbox transfers start SCHEDULED; nudge them into PROCESSING when
+    // the simulator allows it, otherwise wait for the natural lifecycle.
+    for (let attempt = 0; attempt < 5 && current.status === 'SCHEDULED'; attempt += 1) {
+      try {
+        current = await simulateTransferTransition(client, current.id, {
+          nextStatus: 'PROCESSING',
+          ...(options.onBehalfOf ? { onBehalfOf: options.onBehalfOf } : {}),
+        });
+      } catch {
+        await sleep(700);
+        current = await getTransfer(client, current.id, options);
+      }
+    }
+    if (current.status === 'SCHEDULED') return current;
+  }
   if (current.status === 'PROCESSING') {
     current = await simulateTransferTransition(client, current.id, {
       nextStatus: 'SENT',

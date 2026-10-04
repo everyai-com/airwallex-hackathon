@@ -99,7 +99,8 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 - [x] `npm run typecheck` clean
 - [x] `npm test` — 50 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, and effect assertions on all thirteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
-- [ ] Live sandbox run of Kit 1 recorded (goal → plan → new info → revised decision → outcome)
+- [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
+- [ ] Screen recording of the live Kit 1 run captured for the submission video
 - [ ] Enablement emails sent from `submission/enablement-requests.md` (platform, Airi, merchant)
 - [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)
 - [ ] Screen recording blurs credentials if shown

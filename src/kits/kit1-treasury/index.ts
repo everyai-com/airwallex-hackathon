@@ -1,4 +1,4 @@
-import { getBalances } from '../../api/balances.js';
+import { balanceOf, getBalances, waitForAvailableBalance } from '../../api/balances.js';
 import {
   createBeneficiary,
   euSwiftBeneficiary,
@@ -43,6 +43,10 @@ export async function runKit1(
   const approvedObligationIds: string[] = [];
   const ledger: { action: string; entry: string }[] = [];
   let partsApproval: Approval | undefined;
+  // The mock models the documented flat EUR 12.85 SWIFT fee; the live sandbox
+  // charges a percentage fee, so live conversions carry a small buffer.
+  const liveFeeBuffer = (amount: number): number =>
+    client.isMock ? 0 : round2(amount * 0.005 + 5);
   let forecast = { ...TREASURY_FORECAST };
 
   client.seedMockBalances({ USD: 14_200, EUR: 1_150, GBP: 400 });
@@ -201,17 +205,26 @@ export async function runKit1(
   logger.chapter('Recalculated — only decisions the new cash changes are reopened');
   printPlan(logger, plan3, forecast.confidence);
 
-  const convertAction = plan3.actions.find(
-    (action) => action.kind === 'CONVERT_AND_FUND' && action.obligation.id === 'obl-parts',
+  const partsAction = plan3.actions.find(
+    (action) =>
+      action.obligation.id === 'obl-parts' &&
+      (action.kind === 'CONVERT_AND_FUND' || action.kind === 'FUND'),
   );
+  const executable =
+    partsAction?.kind === 'CONVERT_AND_FUND'
+      ? { amount: partsAction.convertAmount, currency: partsAction.buyCurrency }
+      : partsAction?.kind === 'FUND'
+        ? { amount: partsAction.obligation.amount, currency: partsAction.obligation.currency }
+        : undefined;
 
   // An approval binds to what the approver saw. Re-check the executable tuple
   // before moving money; if anything material changed, stop and re-ask.
   const approvalMatches =
     !partsApproval ||
-    (Math.abs(partsApproval.request.amount - (convertAction?.kind === 'CONVERT_AND_FUND' ? convertAction.convertAmount : Number.NaN)) <= 0.01 &&
-      partsApproval.request.currency === (convertAction?.kind === 'CONVERT_AND_FUND' ? convertAction.buyCurrency : undefined) &&
-      partsApproval.request.counterparty === convertAction?.obligation.counterparty);
+    (executable !== undefined &&
+      Math.abs(partsApproval.request.amount - executable.amount) <= 0.01 &&
+      partsApproval.request.currency === executable.currency &&
+      partsApproval.request.counterparty === partsAction!.obligation.counterparty);
   if (!approvalMatches) {
     logger.decision(
       'ABORT',
@@ -219,36 +232,68 @@ export async function runKit1(
     );
   }
 
-  if (convertAction && convertAction.kind === 'CONVERT_AND_FUND' && approvalMatches) {
-    const parts = convertAction.obligation;
-    await logger.step(`Convert the minimum: USD -> EUR ${convertAction.convertAmount}`, async () => {
-      const quote = await createFxQuote(client, {
-        requestId: ids.fresh(),
-        sellCurrency: convertAction.sellCurrency,
-        buyCurrency: convertAction.buyCurrency,
-        buyAmount: convertAction.convertAmount,
-      });
-      logger.detail('Fresh quote', `${quote.id} at ${quote.rate} (single use)`);
+  if (partsAction && approvalMatches) {
+    const parts = partsAction.obligation;
+    const conversionInput =
+      partsAction.kind === 'CONVERT_AND_FUND'
+        ? {
+            sellCurrency: partsAction.sellCurrency,
+            buyCurrency: partsAction.buyCurrency,
+            // Buy the planner's minimum plus the same live fee buffer the payout
+            // guard below waits for, so the two rules stay in lockstep.
+            convertAmount: round2(
+              partsAction.convertAmount + liveFeeBuffer(partsAction.obligation.amount),
+            ),
+          }
+        : undefined;
 
-      const conversion = await createFxConversion(client, {
-        requestId: ids.forOperation('obl-parts-conversion'),
-        sellCurrency: convertAction.sellCurrency,
-        buyCurrency: convertAction.buyCurrency,
-        buyAmount: convertAction.convertAmount,
-        quoteId: quote.id,
-      });
-      logger.detail(
-        'Conversion',
-        `${conversion.conversionId} ${conversion.status} — sold ${formatAmount(conversion.sellAmount, 'USD')} for ${formatAmount(conversion.buyAmount, 'EUR')} at ${conversion.rate}`,
+    if (conversionInput) {
+      await logger.step(
+        `Convert the minimum: ${conversionInput.sellCurrency} -> ${conversionInput.buyCurrency} ${conversionInput.convertAmount}`,
+        async () => {
+          const quote = await createFxQuote(client, {
+            requestId: ids.fresh(),
+            sellCurrency: conversionInput.sellCurrency,
+            buyCurrency: conversionInput.buyCurrency,
+            buyAmount: conversionInput.convertAmount,
+          });
+          logger.detail('Fresh quote', `${quote.id} at ${quote.rate} (single use)`);
+
+          const conversion = await createFxConversion(client, {
+            requestId: ids.forOperation('obl-parts-conversion'),
+            sellCurrency: conversionInput.sellCurrency,
+            buyCurrency: conversionInput.buyCurrency,
+            buyAmount: conversionInput.convertAmount,
+            quoteId: quote.id,
+          });
+          logger.detail(
+            'Conversion',
+            `${conversion.conversionId} ${conversion.status} — sold ${formatAmount(conversion.sellAmount, 'USD')} for ${formatAmount(conversion.buyAmount, 'EUR')} at ${conversion.rate}`,
+          );
+          logger.decision('FX', 'FX calls carry no x-api-version header; the quote is booked exactly once');
+          ledger.push({
+            action: 'CONVERTED',
+            entry: `${formatAmount(conversion.sellAmount, 'USD')} -> ${formatAmount(conversion.buyAmount, 'EUR')} at ${conversion.rate} · quote ${quote.id} booked once`,
+          });
+        },
       );
-      logger.decision('FX', 'FX calls carry no x-api-version header; the quote is booked exactly once');
-      ledger.push({
-        action: 'CONVERTED',
-        entry: `${formatAmount(conversion.sellAmount, 'USD')} -> ${formatAmount(conversion.buyAmount, 'EUR')} at ${conversion.rate} · quote ${quote.id} booked once`,
-      });
-    });
+    }
 
-    await logger.step(`Pay ${parts.counterparty} with the converted funds`, async () => {
+    await logger.step(
+      `Pay ${parts.counterparty} ${conversionInput ? 'with the converted funds' : 'from the funded balance'}`,
+      async () => {
+      // Live conversions post a few seconds after they report SETTLED; wait for
+      // the funded balance instead of racing it, and never send a partial payout.
+      const required = round2(amountWithFee(parts) + liveFeeBuffer(parts.amount));
+      const funded = await waitForAvailableBalance(client, {
+        currency: parts.currency,
+        amount: required,
+      });
+      if (balanceOf(funded, parts.currency) + 0.005 < required) {
+        throw new Error(
+          `${parts.currency} did not fund in time for the converted payout; not sending a partial payment.`,
+        );
+      }
       const beneficiaryId = await ensureBeneficiary(client, parts.beneficiary, logger);
       const transfer = await createTransfer(client, {
         requestId: ids.forOperation('obl-parts-transfer'),

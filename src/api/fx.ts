@@ -36,6 +36,9 @@ export async function getFxRate(
   return rate;
 }
 
+/** Quote validity periods accepted by the live FX quote endpoint. */
+export type QuoteValidity = 'MIN_1' | 'MIN_15' | 'MIN_30' | 'HR_1' | 'HR_4' | 'HR_8' | 'HR_24';
+
 /**
  * POST /fx/quotes/create — a quote is single-use. Book it once with one
  * conversion, then request a fresh quote for any further conversion.
@@ -48,6 +51,8 @@ export async function createFxQuote(
     buyCurrency: string;
     buyAmount?: number;
     sellAmount?: number;
+    /** Live requires validity; MIN_30 works in the default short-validity group. */
+    validity?: QuoteValidity;
     onBehalfOf?: string;
   },
 ): Promise<FxQuote> {
@@ -56,6 +61,7 @@ export async function createFxQuote(
       request_id: input.requestId,
       sell_currency: input.sellCurrency,
       buy_currency: input.buyCurrency,
+      validity: input.validity ?? 'MIN_30',
       ...(input.buyAmount !== undefined ? { buy_amount: String(input.buyAmount) } : {}),
       ...(input.sellAmount !== undefined ? { sell_amount: String(input.sellAmount) } : {}),
     },
