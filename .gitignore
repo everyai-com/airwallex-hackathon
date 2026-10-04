@@ -6,3 +6,4 @@ node_modules/
 submission/.env.applications
 
 .commandcode/
+submission/ready-to-send-email.txt
