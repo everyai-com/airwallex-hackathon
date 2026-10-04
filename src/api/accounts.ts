@@ -18,12 +18,24 @@ function toAccount(item: unknown): ConnectedAccount {
  */
 export async function createConnectedAccount(
   client: AirwallexClient,
-  input: { requestId: string; accountDetails: Record<string, unknown> },
+  input: {
+    requestId: string;
+    accountDetails: Record<string, unknown>;
+    /** Live requires a top-level primary_contact with at least an email. */
+    primaryContactEmail: string;
+    customerAgreements?: { agreedToDataUsage?: boolean; agreedToTermsAndConditions?: boolean };
+  },
 ): Promise<ConnectedAccount> {
   const response = await client.request<unknown>('/api/v1/accounts/create', {
     body: {
       request_id: input.requestId,
       account_details: input.accountDetails,
+      customer_agreements: {
+        agreed_to_data_usage: input.customerAgreements?.agreedToDataUsage ?? true,
+        agreed_to_terms_and_conditions:
+          input.customerAgreements?.agreedToTermsAndConditions ?? true,
+      },
+      primary_contact: { email: input.primaryContactEmail },
     },
   });
   return toAccount(response);

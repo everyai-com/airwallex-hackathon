@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createConnectedAccount } from '../src/api/accounts.js';
 import { AirwallexClient } from '../src/core/client.js';
 import { createLogger } from '../src/core/log.js';
 import type { Config } from '../src/config.js';
@@ -38,6 +39,32 @@ function testConfig(): Config {
 function testClient(): AirwallexClient {
   return AirwallexClient.create(testConfig());
 }
+
+// --- Connected accounts: live-shaped create ------------------------------------
+
+test('connected-account create carries primary_contact (live rejects without it)', async () => {
+  const client = testClient();
+  const accountDetails = {
+    business_details: {
+      business_name: 'Probe LLC',
+      business_identifiers: [{ type: 'EIN', country_code: 'US', number: '88-0000001' }],
+    },
+    business_person_details: [{ first_name: 'A', last_name: 'B', roles: ['AUTHORISED_PERSON'] }],
+  };
+  const account = await createConnectedAccount(client, {
+    requestId: 'probe-contact-1',
+    accountDetails,
+    primaryContactEmail: 'a.b@example.com',
+  });
+  assert.match(account.id, /^acct_/);
+  await assert.rejects(
+    () =>
+      client.request('/api/v1/accounts/create', {
+        body: { request_id: 'probe-contact-2', account_details: accountDetails },
+      }),
+    /primary_contact/,
+  );
+});
 
 // --- Kit 5: bridge rationing -------------------------------------------------
 

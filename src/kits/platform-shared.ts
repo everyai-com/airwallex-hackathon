@@ -35,6 +35,7 @@ export async function openConnectedAccount(
     state: 'NY',
     postcode: '10001',
   };
+  const contactEmail = `${input.contactName.toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`;
   const accountDetails = {
     business_details: {
       business_name: input.businessName,
@@ -46,7 +47,7 @@ export async function openConnectedAccount(
       {
         first_name: firstName ?? 'Sandbox',
         last_name: lastName ?? 'Owner',
-        email: `${input.contactName.toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
+        email: contactEmail,
         roles: ['AUTHORISED_PERSON'],
       },
     ],
@@ -55,6 +56,7 @@ export async function openConnectedAccount(
   const created = await createConnectedAccount(client, {
     requestId: newRequestId(),
     accountDetails,
+    primaryContactEmail: contactEmail,
   });
   await updateConnectedAccount(client, created.id, accountDetails);
   await submitConnectedAccount(client, created.id);

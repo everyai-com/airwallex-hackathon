@@ -196,10 +196,30 @@ Thanks!
 
 | # | Item | Blocks | Status |
 | - | ---- | ------ | ------ |
-| 1 | Connected accounts + platform payments | Kits 5–8 live | email ready |
-| 2 | Airi CLI allowlist + card budget | Kit 9 live | email ready (needs your Airi email); kit 9 built and running in mock mode |
-| 3 | Merchant-side Agentic Commerce | Kit 10 live | email ready; kit 10 built with an in-process merchant simulator |
-| 4 | Credit / partner-credit program | — | email ready |
-| 5 | Submission deadline + judging criteria | Submission | asked in email 1/4 |
+| 1 | Connected accounts + platform payments | Kits 5–8 live | sent Oct 4; still gated — live says "cannot onboard business accounts" (verified Oct 4). Repo payload fixed (primary_contact + agreements) so the kits run the moment the switch flips |
+| 2 | Native Payment Acceptance (confirm) | Kit 4 live | sent Oct 4; partially open — intent create/list work, confirm still returns "not enabled for native API access" (verified Oct 4) |
+| 3 | Airi CLI allowlist + card budget | Kit 9 live | sent Oct 4; awaiting reply; kit 9 built and running in mock mode |
+| 4 | Merchant-side Agentic Commerce | Kit 10 live | sent Oct 4; awaiting reply; kit 10 built with an in-process merchant simulator |
+| 5 | Credit / partner-credit program | — | sent Oct 4; awaiting reply |
+| 6 | Submission deadline + judging criteria | Submission | sent Oct 4; awaiting reply |
+
+## When enablement lands — runbook
+
+Each gate unblocks with one command; request ids persist under `.data/`, so
+re-runs resume instead of re-paying.
+
+- **Kit 4 (native confirm opens):** `npm run kit4` — the stored `intent-*` ids
+  resume the already-created intents, then the full arc (confirm → dispute →
+  accept/challenge → escalate → resolve) runs. Record it and attach to the release.
+- **Kits 5–8 (business onboarding opens):** `npm run kit5`, `kit6`, `kit7`,
+  `kit8` in order — the `primary_contact` fix is already in, so no code change
+  is needed. Record at least kit 5.
+- **Kit 9 (Airi CLI allowlisted):** follow the install/auth instructions in the
+  reply, claim the card budget, then switch the kit's Airi confirm path from
+  mock to live.
+- **Kit 10 (merchant MCP details arrive):** point the merchant simulator at the
+  real MCP endpoint + catalog schema from the reply.
+- **After each:** `npm test`, update the tracking table above + the `DEMO.md`
+  checklist, commit.
 
 While you wait: `npm run all --mock` runs every kit end to end with no credentials.

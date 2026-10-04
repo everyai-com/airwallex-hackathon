@@ -888,6 +888,11 @@ export class MockTransport implements Transport {
       if (details === undefined) {
         fail(400, 'field_required', 'account_details is required (an empty object is allowed).');
       }
+      // Live rejects without this: 400 field_required: field [primary_contact] is required.
+      const contact = body.primary_contact as Record<string, any> | undefined;
+      if (!contact?.email) {
+        fail(400, 'field_required', 'field [primary_contact] is required.');
+      }
       const business = details.business_details as Record<string, any> | undefined;
       if (!business?.business_name) {
         fail(400, 'validation_failed', 'account_details.business_details.business_name is required.');
