@@ -19,6 +19,18 @@ import { DISPUTE_CASES } from '../src/kits/kit4-dispute/cases.js';
 import { buildPdfEvidence } from '../src/kits/kit4-dispute/evidence.js';
 import { decideAfterRejection, decideDispute } from '../src/kits/kit4-dispute/policy.js';
 import { runKit4 } from '../src/kits/kit4-dispute/index.js';
+import { runKit15 } from '../src/kits/kit15-onboarding/index.js';
+import {
+  abaValid,
+  decideOnboarding,
+  ibanValid,
+  inferCorridor,
+  parseSupplierDoc,
+  sortCodeValid,
+  swiftValid,
+  validateCorridorFields,
+} from '../src/kits/kit15-onboarding/policy.js';
+import { CORRECTED_DOC, SUPPLIER_DOCS } from '../src/kits/kit15-onboarding/documents.js';
 import type { TransferRecord } from '../src/api/transfers.js';
 import { MockTransport, type MockSnapshot } from '../src/core/mock.js';
 
@@ -300,4 +312,76 @@ test('kit4 settles all three disputes and creates exactly two refunds', async ()
   const statuses = snapshot.disputes.map((dispute) => dispute.status).sort();
   assert.deepEqual(statuses, ['ACCEPTED', 'ACCEPTED', 'REQUIRES_RESPONSE']);
   assert.equal(snapshot.refunds.length, 2);
+});
+
+// --- Kit 15: supplier bank-detail validation ----------------------------------
+
+test('kit15 checksums ABA, IBAN, SWIFT and sort codes in code', () => {
+  assert.equal(abaValid('021000021'), true);
+  assert.equal(abaValid('021000022'), false);
+  assert.equal(abaValid('12345'), false);
+  assert.equal(ibanValid('DE89370400440532013000'), true);
+  assert.equal(ibanValid('DE89370400440532013001'), false);
+  assert.equal(swiftValid('COBADEFFXXX'), true);
+  assert.equal(swiftValid('COBADE'), false);
+  assert.equal(sortCodeValid('40-12-34'), true);
+  assert.equal(sortCodeValid('40-12-3'), false);
+});
+
+test('kit15 parses letters, infers corridors and holds the doubtful', () => {
+  const [us, de, gb] = SUPPLIER_DOCS.map((entry) =>
+    parseSupplierDoc(entry.reference, entry.supplier, entry.text),
+  );
+  assert.equal(inferCorridor(us!), 'us-local');
+  assert.equal(inferCorridor(de!), 'de-swift');
+  assert.equal(inferCorridor(gb!), 'gb-local');
+  assert.deepEqual(validateCorridorFields(us!, 'us-local'), []);
+  assert.deepEqual(validateCorridorFields(de!, 'de-swift'), []);
+  assert.match(validateCorridorFields(gb!, 'gb-local').join(';'), /sort code/);
+
+  const reading = (overrides = {}) => ({
+    mentionsBankDetails: true,
+    mentionsMultipleCountries: false,
+    mentionsMissingDetails: false,
+    rationale: '',
+    citedEvidence: [] as string[],
+    ...overrides,
+  });
+  assert.equal(decideOnboarding(us!, reading()).action, 'APPROVE');
+  assert.equal(decideOnboarding(de!, reading()).action, 'APPROVE');
+  const held = decideOnboarding(
+    gb!,
+    reading({ mentionsMultipleCountries: true, mentionsMissingDetails: true }),
+  );
+  assert.equal(held.action, 'HOLD');
+  assert.equal(held.requiresApproval, true);
+
+  const corrected = parseSupplierDoc(gb!.reference, gb!.supplier, CORRECTED_DOC.text);
+  assert.deepEqual(validateCorridorFields(corrected, 'gb-local'), []);
+  assert.equal(decideOnboarding(corrected, reading()).action, 'APPROVE');
+});
+
+test('kit15 onboards three suppliers with three PAID verifications', async () => {
+  const client = testClient();
+  const result = await runKit15(client, logger, {
+    autoApprove: true,
+    forceHeuristicAnalyst: true,
+  });
+  assert.equal(result.onboarded.length, 3);
+  assert.deepEqual(
+    result.onboarded.map((entry) => entry.corridor).sort(),
+    ['de-swift', 'gb-local', 'us-local'],
+  );
+  assert.ok(result.onboarded.every((entry) => entry.verificationStatus === 'PAID'));
+  assert.ok(result.escalationNote?.includes('Lowly & Sons Ltd'));
+
+  const snapshot = mockSnapshot(client);
+  assert.equal(snapshot.beneficiaries.length, 3);
+  assert.equal(
+    snapshot.transfers.filter((transfer) => transfer.status === 'PAID').length,
+    3,
+  );
+  assert.equal(snapshot.balances.USD, 30_000 - 25);
+  assert.equal(snapshot.balances.EUR, 10_000 - 25 - 12.85, 'SWIFT fee rides on top');
+  assert.equal(snapshot.balances.GBP, 5_000 - 25);
 });

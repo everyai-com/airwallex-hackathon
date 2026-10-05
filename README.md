@@ -1,7 +1,7 @@
-# Airwallex Developer Lab — Agentic Starter (Kits 1–13)
+# Airwallex Developer Lab — Agentic Starter (Kits 1–15)
 
 A TypeScript starter for the Airwallex sandbox hackathon, built around one rule:
-**the model reads, the code decides, the API moves the money.** Thirteen starter kits share a typed
+**the model reads, the code decides, the API moves the money.** Fifteen starter kits share a typed
 REST client, a platform/connected-account layer, a policy layer, an approval gate, an in-memory
 sandbox simulator, and merchant Agentic Commerce + finance-ops simulators so every demo runs end
 to end with or without credentials.
@@ -21,8 +21,10 @@ to end with or without credentials.
 | 11. Invoice-Matching Reconciliation Agent | `npm run kit11` | Match every receipt to its invoice — exact, deduction, partial, overpayment, duplicate, unmatched — and prove the AR and cash identities |
 | 12. Zero-Day Close Agent | `npm run kit12` | Cutoff, revaluation and accrual calls, a balanced double-entry journal, and a trial balance tied to the wallet |
 | 13. AR Collections Agent | `npm run kit13` | Proportionate pressure per overdue invoice — reminder, plan, escalation, write-off — decided from aging, history and risk |
+| 14. Contract-to-Cash Billing Agent | `npm run kit14` | Issue, hold or partially bill each contract from its parsed terms — then collect and reconcile every dollar |
+| 15. Supplier Onboarding Agent | `npm run kit15` | Validate supplier bank details in code, create the beneficiary, and verify each corridor with a funded transfer |
 
-Kits 1–4 and 11–13 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
+Kits 1–4 and 11–15 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
 platform payments), kit 9 needs **Airi CLI access** and kit 10 needs **merchant-side Agentic
 Commerce** — all enabled on request; see
 [`submission/enablement-requests.md`](submission/enablement-requests.md) for ready-to-send emails.
@@ -30,7 +32,7 @@ Until access lands, kits 5–10 run fully in mock mode.
 
 For the official challenge mapping — reconciliation, treasury, collections, payouts, spend policy,
 close — see [`submission/CHALLENGE.md`](submission/CHALLENGE.md). Recorded live sandbox runs —
-kits 1, 2, 3, 11, 12 and 13, real time, no mock — are attached to the repo's
+kits 1, 2, 3, 11, 12, 13, 14 and 15, real time, no mock — are attached to the repo's
 [releases](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04).
 
 For the demo script and the submission checklist, see [`submission/DEMO.md`](submission/DEMO.md).
@@ -275,6 +277,33 @@ customers contacted two days ago. Then new information: Cascade replies offering
 balance in three weeks — the plan policy accepts it (floor 30%, max 30 days), the first USD 3,960
 really lands, and the book reconciles: `opening = recovered + written off + still open`.
 
+### Kit 14 — Contract-to-Cash Billing Agent (`src/kits/kit14-billing`)
+
+Three inbound contracts land as raw text. The analyst reads each one and flags only the billing
+shape — net terms, milestone billing, a disputed line — with verbatim citations; `policy.ts`
+parses every line, quantity, amount, date and milestone in code. The clean USD 8,000 PO issues and
+finalizes immediately; the milestone contract bills 50% on signing and holds the rest until a
+delivery confirmation (new information, analyst-read, code-confirmed) unlocks it; the disputed PO
+bills its USD 4,500 of clean lines and escalates the USD 1,200 workshop line through a bound
+approval, because it exceeds the `max(USD 25, 2%)` tolerance. Every invoice is a real Billing API
+object — DRAFT → line items → FINALIZED, with hosted payment URLs — collected by bank transfer and
+marked paid as the deposits land. The run closes on the identity
+`issued = paid + open` plus a wallet-delta tie-out, and fails if either breaks. A contract the
+analyst and the parser read differently is held for a person instead of billed.
+
+### Kit 15 — Supplier Onboarding Agent (`src/kits/kit15-onboarding`)
+
+Three supplier onboarding letters arrive as raw text. The analyst flags only the shape — bank
+details present, multiple countries signalled, anything missing — with verbatim citations;
+`policy.ts` extracts every field and checksums it in code: ABA (3-7-1), IBAN (mod-97), SWIFT format,
+sort-code shape. The US and German letters validate and onboard immediately (schema check, then the
+beneficiary, then a USD 25 / EUR 25 verification transfer driven to PAID); the UK letter signals
+two corridors and a short sort code, so it is held and escalated with approval. Then new
+information: a corrected letter lands, the analyst re-reads it clean, the code re-validates, and
+the GBP beneficiary onboards with its own PAID verification. The run closes on three beneficiaries,
+three PAID verifications and a per-currency wallet tie-out — resumed transfers count zero new
+spend, so re-runs never double-pay.
+
 ## Architecture
 
 ```
@@ -292,15 +321,16 @@ src/
                             (forecast confidence, remittance reading, escalation notes)
     money.ts, parse.ts, log.ts
   api/                      balances, global accounts + deposits, fx, beneficiaries, transfers,
-                            issuing, payments/disputes, files, accounts, platform money movement
-  kits/                     kit1-treasury … kit13-collections, shared.ts, platform-shared.ts,
+                            issuing, payments/disputes, files, accounts, platform money movement,
+                            billing (customers + one-off invoices)
+  kits/                     kit1-treasury … kit15-onboarding, shared.ts, platform-shared.ts,
                             commerce-catalog.ts (merchant catalog + search),
                             commerce-merchant.ts (hosted checkout + order/Airi contract),
                             billing-shared.ts (receivables book + aging),
                             kit12-close/ledger.ts (double-entry journal + trial balance)
   setup.ts                  Global Account + simulated deposit
   cli.ts                    command dispatch
-tests/                      policy unit tests + mock end-to-end runs of all thirteen kits
+tests/                      policy unit tests + mock end-to-end runs of all fifteen kits
 submission/                 enablement email templates + demo script + checklist
 ```
 
@@ -331,7 +361,7 @@ submission/                 enablement email templates + demo script + checklist
   `required_features`; transfers require `source_currency` and start `SCHEDULED`; FX quotes require
   `validity`; conversions and deposits post a few seconds after they report success, so payouts
   wait for the funded balance; live SWIFT fees are percentage-based while the mock models the
-  documented flat EUR 12.85. Kits 1–3 and 11–13 are verified end to end against
+  documented flat EUR 12.85. Kits 1–3 and 11–15 are verified end to end against
   `api.sandbox.airwallex.com`; kit 4 waits on native Payment Acceptance enablement and kits 5–10
   on platform/Airi/merchant access (see `submission/enablement-requests.md`).
 - **Receivables rules live in code**: deductions clear autonomously only within a
@@ -356,7 +386,7 @@ REST here on purpose.
 
 ```sh
 npm run typecheck
-npm test          # node:test — policy unit tests + all thirteen kits end to end in mock mode
+npm test          # node:test — policy unit tests + all fifteen kits end to end in mock mode
 ```
 
 ## Extending
@@ -369,7 +399,7 @@ npm test          # node:test — policy unit tests + all thirteen kits end to e
 - Kits 9–10 are built mock-first like 5–8: their merchant Agentic Commerce surface is simulated
   in-process (`commerce-catalog.ts`, `commerce-merchant.ts`) until Airi CLI and merchant access
   land — both request templates are in `submission/enablement-requests.md`.
-- Kits 11–13 need no new enablement: they run live on a plain sandbox account and mock-first
+- Kits 11–15 need no new enablement: they run live on a plain sandbox account and mock-first
   everywhere else (`billing-shared.ts` holds the receivables book; `submission/CHALLENGE.md`
   maps every challenge domain to a kit).
 - A reusable starting point for platform kits: `src/kits/platform-shared.ts` (`openConnectedAccount`,

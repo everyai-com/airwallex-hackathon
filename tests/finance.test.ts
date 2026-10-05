@@ -26,6 +26,17 @@ import { assessClose, decideCutoff, fxRevaluation, writeOffPosts } from '../src/
 import { runKit13 } from '../src/kits/kit13-collections/index.js';
 import { assessPlan, decideCollection } from '../src/kits/kit13-collections/policy.js';
 import { AS_OF, customerFor } from '../src/kits/kit13-collections/scenario.js';
+import { runKit14 } from '../src/kits/kit14-billing/index.js';
+import {
+  assertBillingIdentity,
+  contractTotal,
+  decideBilling,
+  deliveryConfirmed,
+  disputeTolerance,
+  matchDisputedLine,
+  parseContract,
+} from '../src/kits/kit14-billing/policy.js';
+import { CONTRACTS, DELIVERY_CONFIRMATION } from '../src/kits/kit14-billing/contracts.js';
 
 const logger = createLogger({ silent: true });
 
@@ -315,4 +326,128 @@ test('kit13 works the book, recovers the plan payment and ties out', async () =>
 
   const snapshot = mockSnapshot(client);
   assert.equal(snapshot.balances.USD, 33_960, 'the plan installment really landed');
+});
+
+// --- Kit 14: contract-to-cash billing ------------------------------------------
+
+test('kit14 parses lines, milestones, terms and disputes in code', () => {
+  const [clean, milestones, disputed] = CONTRACTS;
+  const cleanParsed = parseContract(clean!.reference, clean!.customer, clean!.currency, clean!.text);
+  assert.equal(cleanParsed.lines.length, 2);
+  assert.equal(cleanParsed.netDays, 30);
+  assert.equal(contractTotal(cleanParsed), 8_000);
+  assert.equal(cleanParsed.disputedAmount, 0);
+
+  const milestoneParsed = parseContract(
+    milestones!.reference,
+    milestones!.customer,
+    milestones!.currency,
+    milestones!.text,
+  );
+  assert.equal(milestoneParsed.milestones.length, 2);
+  assert.equal(milestoneParsed.netDays, 15);
+  assert.equal(contractTotal(milestoneParsed), 12_000);
+
+  const disputedParsed = parseContract(
+    disputed!.reference,
+    disputed!.customer,
+    disputed!.currency,
+    disputed!.text,
+  );
+  assert.equal(disputedParsed.disputedAmount, 1_200);
+  assert.equal(matchDisputedLine(disputedParsed)?.description, 'Onboarding workshop (two days, onsite)');
+  assert.equal(disputeTolerance(contractTotal(disputedParsed)), 114);
+});
+
+test('kit14 bills clean lines, holds milestones, escalates disputes, holds on mismatch', () => {
+  const [clean, milestones, disputed] = CONTRACTS.map((entry) =>
+    parseContract(entry.reference, entry.customer, entry.currency, entry.text),
+  );
+  const reading = (overrides = {}) => ({
+    mentionsNetTerms: true,
+    mentionsMilestones: false,
+    mentionsDispute: false,
+    rationale: '',
+    citedEvidence: [] as string[],
+    ...overrides,
+  });
+
+  assert.equal(decideBilling(clean!, reading(), { delivered: false }).action, 'ISSUE_NOW');
+
+  const held = decideBilling(milestones!, reading({ mentionsMilestones: true }), { delivered: false });
+  assert.equal(held.action, 'ISSUE_MILESTONES_DUE');
+  assert.equal(held.dueMilestones.length, 1);
+  assert.equal(held.heldMilestones.length, 1);
+  const released = decideBilling(milestones!, reading({ mentionsMilestones: true }), { delivered: true });
+  assert.equal(released.heldMilestones.length, 0);
+
+  const partial = decideBilling(disputed!, reading({ mentionsDispute: true }), { delivered: false });
+  assert.equal(partial.action, 'PARTIAL_ISSUE');
+  assert.equal(partial.requiresApproval, true);
+  assert.equal(partial.issueLines.length, 1);
+
+  assert.equal(
+    decideBilling(milestones!, reading(), { delivered: false }).action,
+    'HOLD',
+    'analyst missed the milestones the parser found',
+  );
+  assert.equal(
+    decideBilling(clean!, reading({ mentionsDispute: true }), { delivered: false }).action,
+    'HOLD',
+    'analyst sees a dispute the parser cannot find',
+  );
+
+  assert.equal(
+    deliveryConfirmed(
+      reading({ mentionsMilestones: true }),
+      DELIVERY_CONFIRMATION.text,
+    ),
+    true,
+  );
+  assert.equal(deliveryConfirmed(reading({ mentionsDispute: true }), DELIVERY_CONFIRMATION.text), false);
+
+  assertBillingIdentity({ issued: 24_500, paid: 18_500, open: 6_000, currency: 'USD' });
+  assert.throws(
+    () => assertBillingIdentity({ issued: 24_500, paid: 18_000, open: 6_000, currency: 'USD' }),
+    /Billing identity broken/,
+  );
+});
+
+test('kit14 issues real invoices, collects three and leaves one open', async () => {
+  const client = testClient();
+  const result = await runKit14(client, logger, {
+    autoApprove: true,
+    forceHeuristicAnalyst: true,
+  });
+
+  assert.equal(result.invoices.length, 4);
+  assert.ok(result.invoices.every((invoice) => invoice.status === 'FINALIZED'));
+  assert.equal(result.invoices.filter((invoice) => invoice.paymentStatus === 'PAID').length, 3);
+  assert.deepEqual(
+    result.invoices.map((invoice) => invoice.number).sort(),
+    ['K14-MSA117-M1', 'K14-MSA117-M2', 'K14-PO2201', 'K14-PO2202-PART'],
+  );
+  assert.equal(result.paidTotal, 18_500);
+  assert.equal(result.openTotal, 6_000);
+  assert.ok(result.escalationNote?.includes('Datawise Inc'));
+  assert.equal(result.wallet.USD, 48_500);
+
+  const snapshot = mockSnapshot(client);
+  assert.equal(snapshot.balances.USD, 48_500, 'the three bank transfers really landed');
+});
+
+test('kit14 resumes on a second run without duplicating invoices', async () => {
+  const client = testClient();
+  const options = { autoApprove: true, forceHeuristicAnalyst: true };
+  await runKit14(client, logger, options);
+  // Mock request ids are ephemeral, so the second run reuses the invoice
+  // numbers with fresh ids — the same shape as a live --fresh re-run.
+  const second = await runKit14(client, logger, options);
+  assert.equal(second.invoices.length, 4);
+  assert.deepEqual(
+    [...new Set(second.invoices.map((invoice) => invoice.number))].sort(),
+    ['K14-MSA117-M1', 'K14-MSA117-M2', 'K14-PO2201', 'K14-PO2202-PART'],
+  );
+  assert.equal(second.paidTotal, 18_500);
+  assert.equal(second.openTotal, 6_000);
 });

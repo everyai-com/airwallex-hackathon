@@ -22,7 +22,11 @@
     "kit11": "tsx src/cli.ts kit11",
     "kit12": "tsx src/cli.ts kit12",
     "kit13": "tsx src/cli.ts kit13",
+    "kit14": "tsx src/cli.ts kit14",
+    "kit15": "tsx src/cli.ts kit15",
     "all": "tsx src/cli.ts all",
+    "web": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },

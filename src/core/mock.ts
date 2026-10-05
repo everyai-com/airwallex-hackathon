@@ -85,6 +85,8 @@ interface MockState {
   requestIds: Map<string, string>;
   cardholders: Record<string, unknown>[];
   cards: MockCard[];
+  billingCustomers: Map<string, Record<string, unknown>>;
+  invoices: Map<string, Record<string, any>>;
   cardTransactions: MockCardTransaction[];
   paymentIntents: Map<string, Record<string, unknown>>;
   disputes: MockDispute[];
@@ -105,6 +107,7 @@ export interface MockSnapshot {
   moneyMoves: Record<string, any>[];
   cardTransactions: MockCardTransaction[];
   cards: MockCard[];
+  beneficiaries: Record<string, unknown>[];
   disputes: MockDispute[];
   refunds: Record<string, unknown>[];
   paymentIntents: Record<string, unknown>[];
@@ -197,6 +200,8 @@ export class MockTransport implements Transport {
       requestIds: new Map(),
       cardholders: [],
       cards: [],
+      billingCustomers: new Map(),
+      invoices: new Map(),
       cardTransactions: [],
       paymentIntents: new Map(),
       disputes: [],
@@ -226,6 +231,7 @@ export class MockTransport implements Transport {
       moneyMoves: copy([...this.state.moneyMoves.values()]),
       cardTransactions: copy(this.state.cardTransactions),
       cards: copy(this.state.cards),
+      beneficiaries: copy(this.state.beneficiaries),
       disputes: copy(this.state.disputes),
       refunds: copy(this.state.refunds),
       paymentIntents: copy([...this.state.paymentIntents.values()]),
@@ -1060,6 +1066,138 @@ export class MockTransport implements Transport {
       };
       this.state.platformReports.push(report);
       return { status: 201, data: report };
+    }
+
+    // --- Billing: customers and one-off invoices (kit 14) ---
+
+    if (method === 'POST' && path === '/api/v1/billing/billing_customers/create') {
+      const requestId = String(body.request_id ?? '');
+      this.claimRequestId(requestId, 'billing_customer');
+      const id = `bcus_${randomUUID().slice(0, 10)}`;
+      const customer = {
+        id,
+        name: body.name ?? null,
+        email: body.email ?? null,
+        type: body.type ?? 'INDIVIDUAL',
+        created_at: nowIso(),
+      };
+      this.state.billingCustomers.set(id, customer);
+      return { status: 201, data: customer };
+    }
+
+    if (method === 'GET' && path === '/api/v1/billing/billing_customers') {
+      return { status: 200, data: { items: [...this.state.billingCustomers.values()] } };
+    }
+
+    if (method === 'POST' && path === '/api/v1/billing/invoices/create') {
+      const requestId = String(body.request_id ?? '');
+      this.claimRequestId(requestId, 'invoice');
+      for (const field of ['billing_customer_id', 'currency']) {
+        if (body[field] === undefined) fail(400, 'field_required', `${field} is required.`);
+      }
+      if (!this.state.billingCustomers.has(String(body.billing_customer_id))) {
+        fail(404, 'resource_not_found', 'Billing customer not found.');
+      }
+      const number = String(body.number ?? `INV-MOCK-${randomUUID().slice(0, 6).toUpperCase()}`);
+      if ([...this.state.invoices.values()].some((entry) => entry.number === number)) {
+        fail(400, 'validation_error', `Duplicated invoice number: ${number}`);
+      }
+      const id = `inv_${randomUUID().slice(0, 10)}`;
+      const invoice = {
+        id,
+        number,
+        billing_customer_id: body.billing_customer_id,
+        currency: body.currency,
+        collection_method: body.collection_method ?? 'OUT_OF_BAND',
+        status: 'DRAFT',
+        payment_status: 'UNPAID',
+        total_amount: 0,
+        amount_due: 0,
+        line_items: [] as Record<string, any>[],
+        created_at: nowIso(),
+      };
+      this.state.invoices.set(id, invoice);
+      return { status: 201, data: invoice };
+    }
+
+    if (method === 'GET' && path === '/api/v1/billing/invoices') {
+      return { status: 200, data: { items: [...this.state.invoices.values()] } };
+    }
+
+    const invoiceLinesMatch = path.match(/^\/api\/v1\/billing\/invoices\/([^/]+)\/line_items$/);
+    if (method === 'GET' && invoiceLinesMatch) {
+      const invoice = this.state.invoices.get(invoiceLinesMatch[1]!);
+      if (!invoice) fail(404, 'not_found', 'Invoice not found.');
+      return { status: 200, data: { items: invoice.line_items } };
+    }
+
+    const invoiceAddLinesMatch = path.match(/^\/api\/v1\/billing\/invoices\/([^/]+)\/add_line_items$/);
+    if (method === 'POST' && invoiceAddLinesMatch) {
+      const invoice = this.state.invoices.get(invoiceAddLinesMatch[1]!);
+      if (!invoice) fail(404, 'not_found', 'Invoice not found.');
+      if (invoice.status !== 'DRAFT') {
+        fail(400, 'validation_error', 'Line items can only be added to a DRAFT invoice.');
+      }
+      this.claimRequestId(String(body.request_id ?? ''), 'invoice_line_items');
+      const items = (body.line_items ?? []) as Record<string, any>[];
+      if (!Array.isArray(items) || items.length === 0) {
+        fail(400, 'field_required', 'line_items must be a non-empty array.');
+      }
+      let added = 0;
+      for (const item of items) {
+        const price = (item.price ?? {}) as Record<string, any>;
+        const quantity = Number(item.quantity ?? 1);
+        const amount =
+          price.pricing_model === 'FLAT'
+            ? Number(price.flat_amount ?? 0)
+            : Number(price.unit_amount ?? 0) * quantity;
+        added = Math.round((added + amount) * 100) / 100;
+        invoice.line_items.push({
+          id: `li_${randomUUID().slice(0, 8)}`,
+          description: item.description ?? '',
+          quantity,
+          amount: Math.round(amount * 100) / 100,
+        });
+      }
+      invoice.total_amount = Math.round((invoice.total_amount + added) * 100) / 100;
+      invoice.amount_due = invoice.total_amount;
+      return { status: 201, data: invoice };
+    }
+
+    const invoiceFinalizeMatch = path.match(/^\/api\/v1\/billing\/invoices\/([^/]+)\/finalize$/);
+    if (method === 'POST' && invoiceFinalizeMatch) {
+      const invoice = this.state.invoices.get(invoiceFinalizeMatch[1]!);
+      if (!invoice) fail(404, 'not_found', 'Invoice not found.');
+      if (invoice.status !== 'DRAFT') {
+        fail(400, 'validation_error', 'Only a DRAFT invoice can be finalized.');
+      }
+      if (invoice.line_items.length === 0) {
+        fail(400, 'validation_error', 'An invoice needs at least one line item to finalize.');
+      }
+      invoice.status = 'FINALIZED';
+      invoice.finalized_at = nowIso();
+      return { status: 200, data: invoice };
+    }
+
+    const invoicePayMatch = path.match(/^\/api\/v1\/billing\/invoices\/([^/]+)\/mark_as_paid$/);
+    if (method === 'POST' && invoicePayMatch) {
+      const invoice = this.state.invoices.get(invoicePayMatch[1]!);
+      if (!invoice) fail(404, 'not_found', 'Invoice not found.');
+      if (invoice.status !== 'FINALIZED' || invoice.payment_status === 'PAID') {
+        fail(400, 'validation_error', 'Only a FINALIZED unpaid invoice can be marked paid.');
+      }
+      invoice.payment_status = 'PAID';
+      invoice.amount_due = 0;
+      invoice.paid_at = nowIso();
+      invoice.paid_out_of_band = true;
+      return { status: 200, data: invoice };
+    }
+
+    const invoiceMatch = path.match(/^\/api\/v1\/billing\/invoices\/([^/]+)$/);
+    if (method === 'GET' && invoiceMatch) {
+      const invoice = this.state.invoices.get(invoiceMatch[1]!);
+      if (!invoice) fail(404, 'not_found', 'Invoice not found.');
+      return { status: 200, data: invoice };
     }
 
     fail(400, 'invalid_endpoint', `Mock transport has no route for ${method} ${path}.`);

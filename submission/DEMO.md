@@ -8,7 +8,7 @@ Every kit below is built around that, with the thresholds in code.
 
 ```sh
 npm install                      # dev deps included via .npmrc (NODE_ENV=production safe)
-npx tsx src/cli.ts all --mock    # smoke-test all thirteen kits, no credentials
+npx tsx src/cli.ts all --mock    # smoke-test all fifteen kits, no credentials
 ```
 
 For the live flagship demo:
@@ -79,6 +79,14 @@ Talking points judges love:
 - **Kit 13 (Collections):** `npm run kit13`. Reminder / firm notice / payment plan / approved
   escalation / small-balance write-off per invoice; a 7-day cooldown; then Cascade accepts a plan
   (40% now) and the first payment lands for real.
+- **Kit 14 (Billing — contract-to-cash):** `npm run kit14`. Three raw contracts in: a clean PO
+  issues immediately, a milestone contract bills 50% now and 50% on the delivery trigger, a
+  disputed PO bills clean lines and escalates the USD 1,200 line with approval. Real Billing API
+  invoices with hosted payment URLs; closes on `issued = paid + open` plus a wallet tie-out.
+- **Kit 15 (Supplier onboarding):** `npm run kit15`. Three bank-detail letters in: US and German
+  suppliers validate (ABA/IBAN checksums in code) and onboard with PAID verification transfers;
+  the UK letter is held (two corridors, short sort code) until a corrected letter lands, then it
+  onboards too. Resumed runs show zero new spend — never a double-pay.
 
 The full domain map is in [`submission/CHALLENGE.md`](CHALLENGE.md): every official challenge
 domain — reconciliation, treasury, collections, payouts, spend policy, close — has a kit.
@@ -97,11 +105,11 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 ## 4. Submission checklist
 
 - [x] `npm run typecheck` clean
-- [x] `npm test` — 51 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, connected-account payload shape, and effect assertions on all thirteen kits)
+- [x] `npm test` — 58 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, connected-account payload shape, billing parser/decisions, and effect assertions on all fifteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
-- [x] Live-verified kits 1–3 and 11–13 against the sandbox; kit 4 partially open (intent create/list work, confirm still gated — verified Oct 4); kits 5–8 still gated at business onboarding (verified Oct 4, repo payload fixed); kits 9–10 await the Airi/merchant replies (all tracked in `enablement-requests.md`)
-- [x] Live runs recorded for kits 1, 2, 3, 11, 12 and 13 (real time, no credentials shown): [release videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
+- [x] Live-verified kits 1–3 and 11–15 against the sandbox (kits 14–15 live Oct 5: real invoices issued/collected/reconciled; 3 suppliers onboarded with PAID verifications); kit 4 partially open (intent create/list work, confirm still gated — verified Oct 4); kits 5–8 still gated at business onboarding (verified Oct 4, repo payload fixed); kits 9–10 await the Airi/merchant replies (all tracked in `enablement-requests.md`)
+- [x] Live runs recorded for kits 1, 2, 3, 11, 12, 13, 14 and 15 (real time, no credentials shown): [release videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
 - [x] Enablement emails sent — the consolidated email to devhelp@airwallex.com went out from Gmail on 2026-10-04 (platform access, native Payment Acceptance, Airi CLI, merchant Agentic Commerce, credits, submission details)
 - [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)
 - [x] Recording shows no credentials (terminal text only)

@@ -62,10 +62,55 @@ export interface RemittanceReading {
   citedEvidence: string[];
 }
 
+export interface ContractInput {
+  customer: string;
+  /** PO number, MSA reference or amendment id — what the contract calls itself. */
+  reference: string;
+  /** The raw contract or PO text the customer sent. */
+  text: string;
+}
+
+/**
+ * What the model may read from a contract: which billing shapes it signals
+ * (net terms, milestones, a dispute) — never lines, amounts or dates. The
+ * billing policy parses every number in code.
+ */
+export interface ContractReading {
+  mentionsNetTerms: boolean;
+  mentionsMilestones: boolean;
+  mentionsDispute: boolean;
+  rationale: string;
+  citedEvidence: string[];
+}
+
+export interface SupplierDocInput {
+  supplier: string;
+  /** Supplier reference — what the onboarding letter calls itself. */
+  reference: string;
+  /** The raw supplier onboarding letter or bank-details email. */
+  text: string;
+}
+
+/**
+ * What the model may read from a supplier doc: whether bank details are
+ * present, whether several countries/corridors are signalled, and whether the
+ * writer flags anything missing or uncertain. Field extraction, checksums and
+ * the corridor decision are code.
+ */
+export interface SupplierDocReading {
+  mentionsBankDetails: boolean;
+  mentionsMultipleCountries: boolean;
+  mentionsMissingDetails: boolean;
+  rationale: string;
+  citedEvidence: string[];
+}
+
 export interface Analyst {
   readonly kind: 'claude' | 'heuristic';
   assessForecast(input: ForecastInput): Promise<ForecastAssessment>;
   readRemittance(input: RemittanceInput): Promise<RemittanceReading>;
+  readContract(input: ContractInput): Promise<ContractReading>;
+  readSupplierDoc(input: SupplierDocInput): Promise<SupplierDocReading>;
   explainException(input: ExceptionInput): Promise<string>;
 }
 
@@ -144,6 +189,76 @@ export class HeuristicAnalyst implements Analyst {
       rationale:
         'The new information is mixed or neutral, so the forecast keeps its direction with a lower confidence.',
       citedEvidence: [...negatives, ...positives].slice(0, 4),
+    };
+  }
+
+  async readContract(input: ContractInput): Promise<ContractReading> {
+    const mentionsNetTerms = /net[-\s]?\d{1,3}|payment terms|due within/i.test(input.text);
+    const mentionsMilestones =
+      /milestone|tranche|on signing|on delivery|upon (signing|delivery|acceptance)|\bphase\b|\bstage\b/i.test(
+        input.text,
+      );
+    const mentionsDispute =
+      /dispute|short[-\s]?(shipped|delivered|paid)|damaged|defective|withhold|deduct|claim/i.test(
+        input.text,
+      );
+    const citedEvidence = sentences(input.text)
+      .filter(
+        (sentence) =>
+          /net[-\s]?\d{1,3}|payment terms|due within|milestone|tranche|on signing|on delivery|upon (signing|delivery|acceptance)|\bphase\b|\bstage\b|dispute|short[-\s]?(shipped|delivered|paid)|damaged|defective|withhold|deduct|claim/i.test(
+            sentence,
+          ),
+      )
+      .slice(0, 4)
+      .map((sentence) => (sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence));
+    const shapes = [
+      mentionsNetTerms ? 'net payment terms' : '',
+      mentionsMilestones ? 'milestone billing' : '',
+      mentionsDispute ? 'a disputed line' : '',
+    ].filter(Boolean);
+    return {
+      mentionsNetTerms,
+      mentionsMilestones,
+      mentionsDispute,
+      rationale: shapes.length
+        ? `The contract signals ${shapes.join(', ')}. The code parses every line, amount and date.`
+        : 'The contract carries no recognizable billing shape; the code decides from the parsed lines alone.',
+      citedEvidence,
+    };
+  }
+
+  async readSupplierDoc(input: SupplierDocInput): Promise<SupplierDocReading> {
+    const mentionsBankDetails =
+      /bank|account (number|name)|iban|routing|sort code|swift/i.test(input.text);
+    const countryCues = [
+      /\bUS\b|United States|ABA/i,
+      /\bGB\b|\bUK\b|United Kingdom|sort code/i,
+      /\bDE\b|Germany|IBAN/i,
+    ].filter((pattern) => pattern.test(input.text)).length;
+    const mentionsMultipleCountries = countryCues >= 2;
+    const mentionsMissingDetails =
+      /missing|incomplete|\bTBD\b|to follow|pending|unclear|confirm/i.test(input.text);
+    const citedEvidence = sentences(input.text)
+      .filter((sentence) =>
+        /bank|account (number|name)|iban|routing|sort code|swift|\bUS\b|\bGB\b|\bUK\b|\bDE\b|missing|incomplete|\bTBD\b|to follow|pending|unclear|confirm/i.test(
+          sentence,
+        ),
+      )
+      .slice(0, 4)
+      .map((sentence) => (sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence));
+    const flags = [
+      mentionsBankDetails ? 'bank details' : '',
+      mentionsMultipleCountries ? 'multiple countries' : '',
+      mentionsMissingDetails ? 'missing details' : '',
+    ].filter(Boolean);
+    return {
+      mentionsBankDetails,
+      mentionsMultipleCountries,
+      mentionsMissingDetails,
+      rationale: flags.length
+        ? `The letter signals ${flags.join(', ')}. The code extracts and checksums every field.`
+        : 'The letter carries no recognizable bank details; the code has nothing to validate.',
+      citedEvidence,
     };
   }
 
@@ -304,6 +419,102 @@ Extract only invoice references and whether the text claims a discount or a cred
       };
     } catch (error) {
       const fallback = await this.fallback.readRemittance(input);
+      return {
+        ...fallback,
+        rationale: `${fallback.rationale} (Claude analyst unavailable: ${(error as Error).message}; heuristic fallback used.)`,
+      };
+    }
+  }
+
+  async readContract(input: ContractInput): Promise<ContractReading> {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.options.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.model,
+          max_tokens: 400,
+          system: `You read a customer purchase order or contract for a billing agent.
+Return ONLY JSON: {"mentions_net_terms":true|false,"mentions_milestones":true|false,"mentions_dispute":true|false,"rationale":"1-2 sentences","cited_evidence":["verbatim quote", ...]}.
+Flag only which billing shapes the text signals: net payment terms, milestone/tranche billing, or a disputed line. Never extract or invent amounts, dates, quantities or line items.`,
+          messages: [{ role: 'user', content: JSON.stringify(input) }],
+        }),
+      });
+      if (!response.ok) throw new Error(`Anthropic API responded ${response.status}`);
+      const payload = (await response.json()) as {
+        content?: Array<{ type: string; text?: string }>;
+      };
+      const text = payload.content?.find((block) => block.type === 'text')?.text ?? '';
+      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as {
+        mentions_net_terms?: unknown;
+        mentions_milestones?: unknown;
+        mentions_dispute?: unknown;
+        rationale?: unknown;
+        cited_evidence?: unknown;
+      };
+      return {
+        mentionsNetTerms: json.mentions_net_terms === true,
+        mentionsMilestones: json.mentions_milestones === true,
+        mentionsDispute: json.mentions_dispute === true,
+        rationale: String(json.rationale ?? '').slice(0, 600),
+        citedEvidence: Array.isArray(json.cited_evidence)
+          ? json.cited_evidence.map((item) => String(item)).slice(0, 5)
+          : [],
+      };
+    } catch (error) {
+      const fallback = await this.fallback.readContract(input);
+      return {
+        ...fallback,
+        rationale: `${fallback.rationale} (Claude analyst unavailable: ${(error as Error).message}; heuristic fallback used.)`,
+      };
+    }
+  }
+
+  async readSupplierDoc(input: SupplierDocInput): Promise<SupplierDocReading> {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.options.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.model,
+          max_tokens: 400,
+          system: `You read a supplier onboarding letter for a payouts agent.
+Return ONLY JSON: {"mentions_bank_details":true|false,"mentions_multiple_countries":true|false,"mentions_missing_details":true|false,"rationale":"1-2 sentences","cited_evidence":["verbatim quote", ...]}.
+Flag only whether bank details are present, whether several countries or corridors are signalled, and whether the writer flags anything missing or uncertain. Never extract or invent account numbers, routings, IBANs or addresses.`,
+          messages: [{ role: 'user', content: JSON.stringify(input) }],
+        }),
+      });
+      if (!response.ok) throw new Error(`Anthropic API responded ${response.status}`);
+      const payload = (await response.json()) as {
+        content?: Array<{ type: string; text?: string }>;
+      };
+      const text = payload.content?.find((block) => block.type === 'text')?.text ?? '';
+      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as {
+        mentions_bank_details?: unknown;
+        mentions_multiple_countries?: unknown;
+        mentions_missing_details?: unknown;
+        rationale?: unknown;
+        cited_evidence?: unknown;
+      };
+      return {
+        mentionsBankDetails: json.mentions_bank_details === true,
+        mentionsMultipleCountries: json.mentions_multiple_countries === true,
+        mentionsMissingDetails: json.mentions_missing_details === true,
+        rationale: String(json.rationale ?? '').slice(0, 600),
+        citedEvidence: Array.isArray(json.cited_evidence)
+          ? json.cited_evidence.map((item) => String(item)).slice(0, 5)
+          : [],
+      };
+    } catch (error) {
+      const fallback = await this.fallback.readSupplierDoc(input);
       return {
         ...fallback,
         rationale: `${fallback.rationale} (Claude analyst unavailable: ${(error as Error).message}; heuristic fallback used.)`,
