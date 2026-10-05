@@ -24,6 +24,7 @@
     "kit13": "tsx src/cli.ts kit13",
     "kit14": "tsx src/cli.ts kit14",
     "kit15": "tsx src/cli.ts kit15",
+    "kit16": "tsx src/cli.ts kit16",
     "all": "tsx src/cli.ts all",
     "web": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",

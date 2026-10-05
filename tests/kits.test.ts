@@ -20,6 +20,18 @@ import { buildPdfEvidence } from '../src/kits/kit4-dispute/evidence.js';
 import { decideAfterRejection, decideDispute } from '../src/kits/kit4-dispute/policy.js';
 import { runKit4 } from '../src/kits/kit4-dispute/index.js';
 import { runKit15 } from '../src/kits/kit15-onboarding/index.js';
+import { runKit16 } from '../src/kits/kit16-hedging/index.js';
+import {
+  hedgeRatio,
+  netExposure,
+  planHedges,
+  usdHeadroom,
+} from '../src/kits/kit16-hedging/policy.js';
+import {
+  HEDGE_OBLIGATIONS,
+  HEDGE_RESERVE_FLOOR_USD,
+  HEDGE_STARTING_BALANCES,
+} from '../src/kits/kit16-hedging/scenario.js';
 import {
   abaValid,
   decideOnboarding,
@@ -384,4 +396,63 @@ test('kit15 onboards three suppliers with three PAID verifications', async () =>
   assert.equal(snapshot.balances.USD, 30_000 - 25);
   assert.equal(snapshot.balances.EUR, 10_000 - 25 - 12.85, 'SWIFT fee rides on top');
   assert.equal(snapshot.balances.GBP, 5_000 - 25);
+});
+
+// --- Kit 16: FX exposure hedging ----------------------------------------------
+
+test('kit16 maps views to ratios, covers shortfalls and bands dust', () => {
+  const view = (direction: 'reaffirmed' | 'weakened' | 'contradicted', confidence: number) => ({
+    direction,
+    confidence,
+    rationale: '',
+    citedEvidence: [] as string[],
+  });
+  assert.equal(hedgeRatio(view('contradicted', 0.42)), 1);
+  assert.equal(hedgeRatio(view('contradicted', 0.7)), 0.75);
+  assert.equal(hedgeRatio(view('weakened', 0.6)), 0.5);
+  assert.equal(hedgeRatio(view('reaffirmed', 0.91)), 0);
+
+  const exposure = netExposure(HEDGE_STARTING_BALANCES, HEDGE_OBLIGATIONS);
+  assert.equal(exposure.EUR, 3_000);
+  assert.equal(exposure.GBP, -1_000);
+  assert.equal(usdHeadroom(HEDGE_STARTING_BALANCES, HEDGE_OBLIGATIONS, HEDGE_RESERVE_FLOOR_USD), 6_000);
+
+  const plan = planHedges(HEDGE_STARTING_BALANCES, HEDGE_OBLIGATIONS, {
+    EUR: view('contradicted', 0.42),
+    GBP: view('reaffirmed', 0.91),
+  });
+  assert.deepEqual(
+    plan.map((entry) => [entry.currency, entry.side, entry.amount]),
+    [
+      ['EUR', 'SELL_SURPLUS', 3_000],
+      ['GBP', 'BUY_SHORTFALL', 1_000],
+    ],
+  );
+
+  const dusty = planHedges({ USD: 20_000, EUR: 9_200, GBP: 4_000 }, HEDGE_OBLIGATIONS, {
+    EUR: view('contradicted', 0.42),
+    GBP: view('reaffirmed', 0.91),
+  });
+  assert.equal(dusty[0]!.side, 'HOLD', 'EUR 200 sits inside the 500 band');
+});
+
+test('kit16 hedges, buys back the pull-forward and covers every currency', async () => {
+  const client = testClient();
+  const result = await runKit16(client, logger, { forceHeuristicAnalyst: true });
+  assert.deepEqual(
+    result.actions.map((entry) => entry.side),
+    ['SELL_SURPLUS', 'BUY_SHORTFALL'],
+  );
+  assert.deepEqual(
+    result.revisedActions.map((entry) => entry.side),
+    ['BUY_SHORTFALL', 'HOLD'],
+  );
+  assert.equal(result.conversions.length, 3);
+  assert.equal(new Set(result.conversions.map((entry) => entry.quoteId)).size, 3);
+  assert.ok((result.exposures.EUR ?? -1) >= 0);
+  assert.ok((result.exposures.GBP ?? -1) >= 0);
+  assert.ok(result.wallet.USD! > HEDGE_RESERVE_FLOOR_USD);
+
+  const snapshot = mockSnapshot(client);
+  assert.equal(snapshot.conversions.length, 3);
 });

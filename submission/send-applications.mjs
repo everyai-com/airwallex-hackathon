@@ -10,6 +10,7 @@
  * Usage:
  *   node submission/send-applications.mjs           # consolidated email (recommended)
  *   node submission/send-applications.mjs --all     # consolidated + four individual emails
+ *   node submission/send-applications.mjs --follow-up  # nudge with the verified live errors
  *   node submission/send-applications.mjs --print   # print to stdout instead of opening drafts
  */
 import { execFile } from 'node:child_process';
@@ -180,9 +181,44 @@ Client ID: ${clientId}
 Thanks!`,
 };
 
-const emails = all
-  ? [consolidated, platformEmail, airiEmail_, merchantEmail, creditsEmail]
-  : [consolidated];
+const followUpEmail = {
+  subject: 'Re: Agentic Banking Hackathon — enablements, credits and card budget for sandbox account',
+  body: `Hi Airwallex team,
+
+Following up on my Oct 4 enablement request. I probed the sandbox today and can
+narrow two of the asks to the exact switch:
+
+1) NATIVE PAYMENT ACCEPTANCE (disputes demo) — PARTIALLY OPEN
+- POST /pa/payment_intents/create and GET /pa/payment_intents now work.
+- Confirming an intent with the sandbox test card still returns "This account
+  is not enabled for native API access" (400 validation_error, verified Oct 4).
+- Ask: please flip the native confirm/charge switch for this account.
+
+2) PLATFORM / CONNECTED ACCOUNTS (platform spend, payroll, lending,
+marketplace kits) — STILL GATED
+- Creating a business connected account with the documented payload
+  (primary_contact + customer_agreements included) returns "This account
+  cannot onboard business accounts" (400 invalid_argument, verified Oct 4).
+- Ask: please enable business connected-account onboarding + platform payments.
+
+3) STILL AWAITING ANY REPLY ON
+- Airi CLI allowlist + install/auth instructions + pre-funded card budget
+- Merchant-side Agentic Commerce: MCP endpoint, catalog schema, checkout contract
+- Hackathon / partner credit claim process
+- Submission deadline, deliverables, judging criteria
+
+Sandbox email: ${sandboxEmail}
+Client ID: ${clientId}
+
+Thanks!
+Phanindra`,
+};
+
+const emails = process.argv.includes('--follow-up')
+  ? [followUpEmail]
+  : all
+    ? [consolidated, platformEmail, airiEmail_, merchantEmail, creditsEmail]
+    : [consolidated];
 
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 

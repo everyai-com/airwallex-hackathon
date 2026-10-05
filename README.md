@@ -1,7 +1,7 @@
-# Airwallex Developer Lab — Agentic Starter (Kits 1–15)
+# Airwallex Developer Lab — Agentic Starter (Kits 1–16)
 
 A TypeScript starter for the Airwallex sandbox hackathon, built around one rule:
-**the model reads, the code decides, the API moves the money.** Fifteen starter kits share a typed
+**the model reads, the code decides, the API moves the money.** Sixteen starter kits share a typed
 REST client, a platform/connected-account layer, a policy layer, an approval gate, an in-memory
 sandbox simulator, and merchant Agentic Commerce + finance-ops simulators so every demo runs end
 to end with or without credentials.
@@ -23,8 +23,9 @@ to end with or without credentials.
 | 13. AR Collections Agent | `npm run kit13` | Proportionate pressure per overdue invoice — reminder, plan, escalation, write-off — decided from aging, history and risk |
 | 14. Contract-to-Cash Billing Agent | `npm run kit14` | Issue, hold or partially bill each contract from its parsed terms — then collect and reconcile every dollar |
 | 15. Supplier Onboarding Agent | `npm run kit15` | Validate supplier bank details in code, create the beneficiary, and verify each corridor with a funded transfer |
+| 16. FX Exposure Hedger | `npm run kit16` | Hedge foreign surpluses to the market view, buy shortfalls regardless, re-hedge when obligations move |
 
-Kits 1–4 and 11–15 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
+Kits 1–4 and 11–16 run with a plain sandbox account. Kits 5–8 need **platform access** (connected accounts +
 platform payments), kit 9 needs **Airi CLI access** and kit 10 needs **merchant-side Agentic
 Commerce** — all enabled on request; see
 [`submission/enablement-requests.md`](submission/enablement-requests.md) for ready-to-send emails.
@@ -32,7 +33,7 @@ Until access lands, kits 5–10 run fully in mock mode.
 
 For the official challenge mapping — reconciliation, treasury, collections, payouts, spend policy,
 close — see [`submission/CHALLENGE.md`](submission/CHALLENGE.md). Recorded live sandbox runs —
-kits 1, 2, 3, 11, 12, 13, 14 and 15, real time, no mock — are attached to the repo's
+kits 1, 2, 3, 11, 12, 13, 14, 15 and 16, real time, no mock — are attached to the repo's
 [releases](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04).
 
 For the demo script and the submission checklist, see [`submission/DEMO.md`](submission/DEMO.md).
@@ -60,6 +61,18 @@ In mock mode an in-memory transport mirrors sandbox semantics: balances post imm
 simulated deposit, transfers move PROCESSING → SENT → PAID/CANCELLED, card controls produce
 `LIMIT_EXCEEDED` / `MERCHANT_CATEGORY_NOT_ALLOWED` / `CARD_INACTIVE`, FX quotes are single-use,
 and duplicate `request_id`s are rejected.
+
+## Web dashboard (all sixteen kits in the browser)
+
+`web/` is a Next.js dashboard that runs every kit through `src/web-runner.ts` — same code paths
+as the CLI, mock or live, with the full chapter/decision event stream rendered per kit:
+
+```sh
+cd web && npm install && npm run dev   # http://localhost:3000
+```
+
+Pick a kit, choose mock or live (live needs the root `.env` sandbox keys), and watch the agent
+observe, decide, act and reconcile. Production build: `npm run build && npm run start`.
 
 ## Live sandbox setup
 
@@ -304,6 +317,17 @@ the GBP beneficiary onboards with its own PAID verification. The run closes on t
 three PAID verifications and a per-currency wallet tie-out — resumed transfers count zero new
 spend, so re-runs never double-pay.
 
+### Kit 16 — FX Exposure Hedger (`src/kits/kit16-hedging`)
+
+The treasury loop for currency risk. The analyst reads two market notes into direction and
+confidence with verbatim citations; `policy.ts` maps the view to a hedge ratio (full / half /
+hold) and computes net exposure per currency from balances minus obligations. EUR 3,000 of surplus
+sells to USD on a weakening view while a GBP 1,000 shortfall is bought whatever the steady view
+says — obligations dominate. Then new information: Steinmetz pulls EUR 2,000 forward, the hedge
+has overshot, and the agent buys back exactly the new shortfall. Every conversion books a fresh
+single-use quote; the run closes with every foreign obligation covered, USD above the floor, and
+a per-currency exposure report.
+
 ## Architecture
 
 ```
@@ -323,14 +347,14 @@ src/
   api/                      balances, global accounts + deposits, fx, beneficiaries, transfers,
                             issuing, payments/disputes, files, accounts, platform money movement,
                             billing (customers + one-off invoices)
-  kits/                     kit1-treasury … kit15-onboarding, shared.ts, platform-shared.ts,
+  kits/                     kit1-treasury … kit16-hedging, shared.ts, platform-shared.ts,
                             commerce-catalog.ts (merchant catalog + search),
                             commerce-merchant.ts (hosted checkout + order/Airi contract),
                             billing-shared.ts (receivables book + aging),
                             kit12-close/ledger.ts (double-entry journal + trial balance)
   setup.ts                  Global Account + simulated deposit
   cli.ts                    command dispatch
-tests/                      policy unit tests + mock end-to-end runs of all fifteen kits
+tests/                      policy unit tests + mock end-to-end runs of all sixteen kits
 submission/                 enablement email templates + demo script + checklist
 ```
 
@@ -361,7 +385,7 @@ submission/                 enablement email templates + demo script + checklist
   `required_features`; transfers require `source_currency` and start `SCHEDULED`; FX quotes require
   `validity`; conversions and deposits post a few seconds after they report success, so payouts
   wait for the funded balance; live SWIFT fees are percentage-based while the mock models the
-  documented flat EUR 12.85. Kits 1–3 and 11–15 are verified end to end against
+  documented flat EUR 12.85. Kits 1–3 and 11–16 are verified end to end against
   `api.sandbox.airwallex.com`; kit 4 waits on native Payment Acceptance enablement and kits 5–10
   on platform/Airi/merchant access (see `submission/enablement-requests.md`).
 - **Receivables rules live in code**: deductions clear autonomously only within a
@@ -386,7 +410,7 @@ REST here on purpose.
 
 ```sh
 npm run typecheck
-npm test          # node:test — policy unit tests + all fifteen kits end to end in mock mode
+npm test          # node:test — policy unit tests + all sixteen kits end to end in mock mode
 ```
 
 ## Extending
@@ -399,7 +423,7 @@ npm test          # node:test — policy unit tests + all fifteen kits end to en
 - Kits 9–10 are built mock-first like 5–8: their merchant Agentic Commerce surface is simulated
   in-process (`commerce-catalog.ts`, `commerce-merchant.ts`) until Airi CLI and merchant access
   land — both request templates are in `submission/enablement-requests.md`.
-- Kits 11–15 need no new enablement: they run live on a plain sandbox account and mock-first
+- Kits 11–16 need no new enablement: they run live on a plain sandbox account and mock-first
   everywhere else (`billing-shared.ts` holds the receivables book; `submission/CHALLENGE.md`
   maps every challenge domain to a kit).
 - A reusable starting point for platform kits: `src/kits/platform-shared.ts` (`openConnectedAccount`,

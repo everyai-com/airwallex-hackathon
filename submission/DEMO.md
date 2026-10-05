@@ -8,7 +8,7 @@ Every kit below is built around that, with the thresholds in code.
 
 ```sh
 npm install                      # dev deps included via .npmrc (NODE_ENV=production safe)
-npx tsx src/cli.ts all --mock    # smoke-test all fifteen kits, no credentials
+npx tsx src/cli.ts all --mock    # smoke-test all sixteen kits, no credentials
 ```
 
 For the live flagship demo:
@@ -87,6 +87,9 @@ Talking points judges love:
   suppliers validate (ABA/IBAN checksums in code) and onboard with PAID verification transfers;
   the UK letter is held (two corridors, short sort code) until a corrected letter lands, then it
   onboards too. Resumed runs show zero new spend — never a double-pay.
+- **Kit 16 (FX hedging):** `npm run kit16`. EUR surplus sells to USD on a weakening market note
+  while a GBP shortfall is bought regardless; then Steinmetz pulls EUR 2,000 forward and the
+  overshot hedge is partly bought back. Single-use quotes, full coverage, floor intact.
 
 The full domain map is in [`submission/CHALLENGE.md`](CHALLENGE.md): every official challenge
 domain — reconciliation, treasury, collections, payouts, spend policy, close — has a kit.
@@ -105,11 +108,11 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 ## 4. Submission checklist
 
 - [x] `npm run typecheck` clean
-- [x] `npm test` — 58 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, connected-account payload shape, billing parser/decisions, and effect assertions on all fifteen kits)
+- [x] `npm test` — 60 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, connected-account payload shape, billing parser/decisions, and effect assertions on all sixteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
-- [x] Live-verified kits 1–3 and 11–15 against the sandbox (kits 14–15 live Oct 5: real invoices issued/collected/reconciled; 3 suppliers onboarded with PAID verifications); kit 4 partially open (intent create/list work, confirm still gated — verified Oct 4); kits 5–8 still gated at business onboarding (verified Oct 4, repo payload fixed); kits 9–10 await the Airi/merchant replies (all tracked in `enablement-requests.md`)
-- [x] Live runs recorded for kits 1, 2, 3, 11, 12, 13, 14 and 15 (real time, no credentials shown): [release videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
+- [x] Live-verified kits 1–3 and 11–16 against the sandbox (kits 14–16 live Oct 5: real invoices issued/collected/reconciled; 3 suppliers onboarded with PAID verifications; FX exposure hedged with rebalanced conversions); kit 4 partially open (intent create/list work, confirm still gated — verified Oct 4); kits 5–8 still gated at business onboarding (verified Oct 4, repo payload fixed); kits 9–10 await the Airi/merchant replies (all tracked in `enablement-requests.md`)
+- [x] Live runs recorded for kits 1, 2, 3, 11, 12, 13, 14, 15 and 16 (real time, no credentials shown): [release videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
 - [x] Enablement emails sent — the consolidated email to devhelp@airwallex.com went out from Gmail on 2026-10-04 (platform access, native Payment Acceptance, Airi CLI, merchant Agentic Commerce, credits, submission details)
 - [x] `.env` never committed (verified absent from git history; `.env`, `.data/` and `submission/.env.applications` are gitignored)
 - [x] Recording shows no credentials (terminal text only)

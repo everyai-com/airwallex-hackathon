@@ -19,6 +19,7 @@ import { runKit12 } from './kits/kit12-close/index.js';
 import { runKit13 } from './kits/kit13-collections/index.js';
 import { runKit14 } from './kits/kit14-billing/index.js';
 import { runKit15 } from './kits/kit15-onboarding/index.js';
+import { runKit16 } from './kits/kit16-hedging/index.js';
 import { runSetup } from './setup.js';
 
 const USAGE = `
@@ -42,6 +43,7 @@ Usage:
   npm run kit13                AR Collections Agent
   npm run kit14                Contract-to-Cash Billing Agent
   npm run kit15                Supplier Onboarding Agent
+  npm run kit16                FX Exposure Hedger
   npm run all                  Run all kits against the same client
 
 Kits 5-8 need platform access, kit 9 needs Airi CLI access and kit 10 needs
@@ -154,6 +156,11 @@ async function main(): Promise<void> {
         ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
       });
       break;
+    case 'kit16':
+      await runKit16(client, logger, {
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
+      break;
     case 'all':
       await runKit1(client, logger, {
         autoApprove,
@@ -183,6 +190,9 @@ async function main(): Promise<void> {
       });
       await runKit15(client, logger, {
         autoApprove,
+        ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
+      });
+      await runKit16(client, logger, {
         ...(args.includes('--heuristic') ? { forceHeuristicAnalyst: true } : {}),
       });
       break;
