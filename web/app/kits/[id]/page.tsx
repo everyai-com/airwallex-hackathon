@@ -14,7 +14,7 @@ const ACCESS_NOTES: Record<string, string> = {
   Merchant: "Needs merchant-side commerce; mock until enabled.",
 };
 
-const HEURISTIC_KITS = new Set(["kit1", "kit11", "kit13", "kit14", "kit15", "kit16"]);
+const HEURISTIC_KITS = new Set(["kit1", "kit11", "kit13", "kit14", "kit15", "kit16", "kit17"]);
 
 export function generateStaticParams() {
   return KITS.map((kit) => ({ id: kit.id }));

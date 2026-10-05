@@ -194,6 +194,15 @@ export const KITS: Kit[] = [
     access: { label: "Sandbox", tone: "green" },
     command: "npm run kit16",
   },
+  {
+    id: "kit17",
+    num: 17,
+    name: "Webhook Event Reactor",
+    decision: "Reconcile paid events, retry once, dedupe redeliveries, escalate the unknown.",
+    groupId: "cash",
+    access: { label: "Sandbox", tone: "green" },
+    command: "npm run kit17",
+  },
 ];
 
 export function getKit(id: string): Kit | undefined {

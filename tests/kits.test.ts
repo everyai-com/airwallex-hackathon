@@ -21,6 +21,14 @@ import { decideAfterRejection, decideDispute } from '../src/kits/kit4-dispute/po
 import { runKit4 } from '../src/kits/kit4-dispute/index.js';
 import { runKit15 } from '../src/kits/kit15-onboarding/index.js';
 import { runKit16 } from '../src/kits/kit16-hedging/index.js';
+import { runKit17 } from '../src/kits/kit17-webhooks/index.js';
+import {
+  invoiceFinalizedEvent,
+  transferFailedEvent,
+  transferPaidEvent,
+} from '../src/kits/kit17-webhooks/events.js';
+import { decideWebhookReaction } from '../src/kits/kit17-webhooks/policy.js';
+import { createReceiver } from '../src/kits/kit17-webhooks/receiver.js';
 import {
   hedgeRatio,
   netExposure,
@@ -455,4 +463,113 @@ test('kit16 hedges, buys back the pull-forward and covers every currency', async
 
   const snapshot = mockSnapshot(client);
   assert.equal(snapshot.conversions.length, 3);
+});
+
+// --- Kit 17: webhook reactions -------------------------------------------------
+
+test('kit17 dedupes redeliveries, retries once and escalates the rest', () => {
+  const context = { seenEventIds: new Set<string>(), replacementsUsed: new Map<string, number>() };
+  const paid = transferPaidEvent('evt_1', {
+    transferId: 'trf_a',
+    requestId: 'req_a',
+    amount: 100,
+    currency: 'USD',
+  });
+  assert.equal(decideWebhookReaction(paid, context).kind, 'RECONCILE');
+  context.seenEventIds.add('evt_1');
+  assert.equal(decideWebhookReaction(paid, context).kind, 'DEDUPED');
+
+  const failed = transferFailedEvent('evt_2', {
+    transferId: 'trf_b',
+    requestId: 'req_b',
+    amount: 60,
+    currency: 'USD',
+    failureType: 'BENEFICIARY_BANK_RETURNED',
+  });
+  assert.equal(decideWebhookReaction(failed, context).kind, 'RETRY');
+  context.replacementsUsed.set('trf_b', 1);
+  assert.equal(decideWebhookReaction(failed, context).kind, 'ESCALATE');
+
+  const suspended = transferFailedEvent('evt_3', {
+    transferId: 'trf_c',
+    requestId: 'req_c',
+    amount: 60,
+    currency: 'USD',
+    failureType: 'TM_SUSPENDED',
+  });
+  const suspendedReaction = decideWebhookReaction(suspended, context);
+  assert.equal(suspendedReaction.kind, 'ESCALATE');
+  assert.equal(suspendedReaction.requiresApproval, true);
+
+  assert.equal(
+    decideWebhookReaction(
+      { id: 'evt_4', type: 'risk.hold.created', createdAt: '', data: {} },
+      context,
+    ).kind,
+    'ESCALATE',
+  );
+  assert.equal(
+    decideWebhookReaction(
+      invoiceFinalizedEvent('evt_5', {
+        invoiceId: 'inv_x',
+        number: 'K17-1001',
+        amount: 2_500,
+        currency: 'USD',
+      }),
+      context,
+    ).kind,
+    'RECONCILE',
+  );
+});
+
+test('kit17 handles six deliveries with the exact reaction mix', async () => {
+  const client = testClient();
+  const result = await runKit17(client, logger, {
+    autoApprove: true,
+    forceHeuristicAnalyst: true,
+  });
+  assert.deepEqual(
+    result.reactions.map((entry) => entry.kind),
+    ['RECONCILE', 'RECONCILE', 'RETRY', 'DEDUPED', 'RECONCILE', 'ESCALATE'],
+  );
+  assert.equal(result.ledger.length, 6);
+  assert.ok(result.escalationNote?.includes('risk.hold.created'));
+
+  const snapshot = mockSnapshot(client);
+  assert.equal(snapshot.transfers.filter((transfer) => transfer.status === 'PAID').length, 2);
+  assert.equal(
+    snapshot.transfers.filter((transfer) => transfer.status === 'CANCELLED').length,
+    1,
+  );
+});
+
+test('kit17 receiver classifies real HTTP deliveries and dedupes', async () => {
+  const { server, handled } = createReceiver();
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  try {
+    const post = async (body: unknown): Promise<{ status: number; json: Record<string, unknown> }> => {
+      const response = await fetch(`http://127.0.0.1:${address.port}/hooks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, json: (await response.json()) as Record<string, unknown> };
+    };
+    const first = await post({ id: 'evt_live_1', type: 'transfer.paid', data: { transfer_id: 'trf_x' } });
+    assert.equal(first.status, 200);
+    assert.equal(first.json.reaction, 'RECONCILE');
+    const redelivery = await post({ id: 'evt_live_1', type: 'transfer.paid', data: { transfer_id: 'trf_x' } });
+    assert.equal(redelivery.json.reaction, 'DEDUPED');
+    const unknown = await post({ id: 'evt_live_2', type: 'something.new', data: {} });
+    assert.equal(unknown.json.reaction, 'ESCALATE');
+    const bad = await post({ nope: true });
+    assert.equal(bad.status, 422);
+    assert.equal(handled.length, 3);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
 });
