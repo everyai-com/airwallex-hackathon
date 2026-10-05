@@ -4,7 +4,7 @@
  *
  * Usage:
  *   npx tsx src/web-runner.ts status
- *   npx tsx src/web-runner.ts run <kit1..kit17> [--mock|--live] [--heuristic]
+ *   npx tsx src/web-runner.ts run <kit1..kit18> [--mock|--live] [--heuristic]
  */
 import { loadConfig, requireCredentials } from './config.js';
 import { AirwallexClient } from './core/client.js';
@@ -27,6 +27,7 @@ import { runKit14 } from './kits/kit14-billing/index.js';
 import { runKit15 } from './kits/kit15-onboarding/index.js';
 import { runKit16 } from './kits/kit16-hedging/index.js';
 import { runKit17 } from './kits/kit17-webhooks/index.js';
+import { runKit18 } from './kits/kit18-netting/index.js';
 
 type RunEvent =
   | { type: 'chapter'; title: string }
@@ -64,6 +65,7 @@ const RUNNERS: Record<string, Runner> = {
   kit15: (c, l, o) => runKit15(c, l, o),
   kit16: (c, l, o) => runKit16(c, l, { forceHeuristicAnalyst: o.forceHeuristicAnalyst }),
   kit17: (c, l, o) => runKit17(c, l, o),
+  kit18: (c, l, o) => runKit18(c, l, o),
 };
 
 function createCapturingLogger(events: RunEvent[]): Logger {
@@ -139,7 +141,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  process.stderr.write('Usage: web-runner.ts status | run <kit1..kit17> [--mock|--live] [--heuristic]\n');
+  process.stderr.write('Usage: web-runner.ts status | run <kit1..kit18> [--mock|--live] [--heuristic]\n');
   process.exitCode = 2;
 }
 

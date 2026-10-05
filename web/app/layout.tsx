@@ -10,7 +10,7 @@ const geist = Geist({
 export const metadata: Metadata = {
   title: "Airwallex Developer Lab",
   description:
-    "Agentic Banking Hackathon — seventeen starter kits sharing one typed REST client, policy layer, and approval gate.",
+    "Agentic Banking Hackathon — eighteen starter kits sharing one typed REST client, policy layer, and approval gate.",
 };
 
 export default function RootLayout({

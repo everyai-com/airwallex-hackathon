@@ -14,7 +14,7 @@ export default function Home() {
           eyebrow={
             <>
               <Tag tone="neutral" size="sm">
-                17 kits
+                18 kits
               </Tag>
               <Tag tone="neutral" size="sm">
                 Mock + Live

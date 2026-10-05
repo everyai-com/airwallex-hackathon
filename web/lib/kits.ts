@@ -203,6 +203,15 @@ export const KITS: Kit[] = [
     access: { label: "Sandbox", tone: "green" },
     command: "npm run kit17",
   },
+  {
+    id: "kit18",
+    num: 18,
+    name: "Intercompany Settlement Agent",
+    decision: "Net eleven legs to seven transfers; exclude the disputed leg.",
+    groupId: "finance",
+    access: { label: "Sandbox", tone: "green" },
+    command: "npm run kit18",
+  },
 ];
 
 export function getKit(id: string): Kit | undefined {

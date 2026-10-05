@@ -211,6 +211,7 @@ const KIT_ICONS: Record<string, (props: IconProps) => React.JSX.Element> = {
   kit15: UsersIcon,
   kit16: TrendIcon,
   kit17: AlertIcon,
+  kit18: LayersIcon,
 };
 
 export function KitIcon({ id, ...props }: IconProps & { id: string }) {

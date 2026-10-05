@@ -22,6 +22,17 @@ import { runKit4 } from '../src/kits/kit4-dispute/index.js';
 import { runKit15 } from '../src/kits/kit15-onboarding/index.js';
 import { runKit16 } from '../src/kits/kit16-hedging/index.js';
 import { runKit17 } from '../src/kits/kit17-webhooks/index.js';
+import { runKit18 } from '../src/kits/kit18-netting/index.js';
+import {
+  assertNetsZero,
+  netPositions,
+  planSettlements,
+  settlementTotals,
+} from '../src/kits/kit18-netting/policy.js';
+import {
+  DISPUTED_LEG_ID,
+  INTERCOMPANY_LEGS,
+} from '../src/kits/kit18-netting/scenario.js';
 import {
   invoiceFinalizedEvent,
   transferFailedEvent,
@@ -572,4 +583,55 @@ test('kit17 receiver classifies real HTTP deliveries and dedupes', async () => {
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
+});
+
+// --- Kit 18: intercompany netting ------------------------------------------------
+
+test('kit18 nets positions to zero and settles minimally', () => {
+  const nettable = INTERCOMPANY_LEGS.filter((leg) => leg.id !== DISPUTED_LEG_ID);
+  const nets = netPositions(nettable);
+  assertNetsZero(nets);
+  assert.deepEqual(nets.USD, { US: 7_500, DE: -8_000, UK: -1_500, SG: 2_000 });
+  assert.deepEqual(nets.EUR, { US: -5_000, DE: 7_500, UK: 0, SG: -2_500 });
+  assert.deepEqual(nets.GBP, { US: -3_000, DE: -1_500, UK: 4_500, SG: 0 });
+
+  const settlements = planSettlements(nets);
+  assert.equal(settlements.length, 7);
+  assert.deepEqual(
+    settlements.map((entry) => [entry.from, entry.to, entry.amount, entry.currency]),
+    [
+      ['DE', 'US', 7_500, 'USD'],
+      ['DE', 'SG', 500, 'USD'],
+      ['UK', 'SG', 1_500, 'USD'],
+      ['US', 'DE', 5_000, 'EUR'],
+      ['SG', 'DE', 2_500, 'EUR'],
+      ['US', 'UK', 3_000, 'GBP'],
+      ['DE', 'UK', 1_500, 'GBP'],
+    ],
+  );
+  assert.deepEqual(settlementTotals(settlements), { USD: 9_500, EUR: 7_500, GBP: 4_500 });
+
+  assert.throws(
+    () => assertNetsZero({ USD: { US: 1, DE: 0, UK: 0, SG: 0 } }),
+    /sum to 1, not zero/,
+  );
+});
+
+test('kit18 excludes the disputed leg and pays seven nets', async () => {
+  const client = testClient();
+  const result = await runKit18(client, logger, {
+    autoApprove: true,
+    forceHeuristicAnalyst: true,
+  });
+  assert.equal(result.grossCount, 11);
+  assert.equal(result.netCount, 7);
+  assert.ok(result.transfers.every((entry) => entry.status === 'PAID'));
+  assert.ok(result.escalationNote?.includes('leg-5'));
+
+  const snapshot = mockSnapshot(client);
+  assert.equal(snapshot.beneficiaries.length, 4);
+  assert.equal(
+    snapshot.transfers.filter((transfer) => transfer.status === 'PAID').length,
+    7,
+  );
 });

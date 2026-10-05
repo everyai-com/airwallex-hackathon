@@ -13,7 +13,7 @@ keeps every threshold in code, never in a prompt.
 | Domain | Kit(s) | The decision it demonstrates |
 | --- | --- | --- |
 | Reconciliation | **Kit 11** `kit11-reconciliation` | Match each bank-feed receipt to the invoice it settles — exact, deduction, partial, overpayment, duplicate, unmatched — while the analyst reads the remittance advice and the code owns tolerance and approvals |
-| Treasury | **Kit 1** `kit1-treasury`, **Kit 16** `kit16-hedging` | Fund / convert / defer / escalate five obligations under a reserve floor and a forecast-confidence commitment limit; hedge FX exposure to the market view and re-hedge when obligations move |
+| Treasury | **Kit 1** `kit1-treasury`, **Kit 16** `kit16-hedging`, **Kit 18** `kit18-netting` | Fund / convert / defer / escalate five obligations under a reserve floor and a forecast-confidence commitment limit; hedge FX exposure to the market view and re-hedge when obligations move; net intercompany legs to minimal settlements, excluding disputes |
 | Collections | **Kit 13** `kit13-collections` | Proportionate pressure per overdue invoice: reminder, firm notice, payment plan, escalation or small-balance write-off — with cooldowns and plan thresholds |
 | Payouts | **Kit 3** `kit3-incident`, **Kit 6** `kit6-payroll`, **Kit 7** `kit7-lending`, **Kit 8** `kit8-marketplace`, **Kit 15** `kit15-onboarding`, **Kit 17** `kit17-webhooks` | Wait / replace / escalate without double-paying; tenant-isolated payroll; floor-bounded advances; net settlement with recomputed reserves; doc-driven beneficiary onboarding with checksums and verification transfers; webhook reactions with dedupe, single retry and escalation |
 | Spend policy | **Kit 2** `kit2-purchase`, **Kit 5** `kit5-platform-spend` | Card controls that encode a cash decision; rationed bridge capital across connected accounts |
@@ -54,7 +54,7 @@ uses the heuristic directly.
 
 ## Live vs mock
 
-Kits 11–17 need only a plain sandbox account for live runs, like kits 1–4:
-run `npm run kit11`, `npm run kit12`, `npm run kit13`, `npm run kit14`, `npm run kit15`, `npm run kit16`, `npm run kit17` without `MOCK`. Kits 5–10
+Kits 11–18 need only a plain sandbox account for live runs, like kits 1–4:
+run `npm run kit11`, `npm run kit12`, `npm run kit13`, `npm run kit14`, `npm run kit15`, `npm run kit16`, `npm run kit17`, `npm run kit18` without `MOCK`. Kits 5–10
 are the enablement-gated ones (platform, Airi, merchant Agentic Commerce) — see
 `enablement-requests.md` for the exact requests.

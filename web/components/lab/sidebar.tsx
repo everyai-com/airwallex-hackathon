@@ -81,7 +81,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             Developer Lab
           </span>
           <span className="caption-style text-subtle block truncate">
-            Agentic Banking · 17 kits
+            Agentic Banking · 18 kits
           </span>
         </div>
       </div>
