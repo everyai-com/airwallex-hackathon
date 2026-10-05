@@ -8,7 +8,7 @@ import {
 } from '../../api/beneficiaries.js';
 import { balanceOf, getBalances } from '../../api/balances.js';
 import { advanceTransferToPaid, createTransfer, type TransferRecord } from '../../api/transfers.js';
-import { createAnalyst } from '../../core/analyst.js';
+import { createAnalyst, type SupplierDocReading } from '../../core/analyst.js';
 import { ApprovalGate } from '../../core/approvals.js';
 import type { AirwallexClient } from '../../core/client.js';
 import type { Logger } from '../../core/log.js';
@@ -92,6 +92,8 @@ export async function runKit15(
   );
 
   const parsed = new Map<string, ParsedSupplier>();
+  // Each letter is sent to the analyst exactly once per run; decisions reuse it.
+  const readings = new Map<string, SupplierDocReading>();
   logger.chapter('Observe — the analyst reads, the parser measures');
   for (const doc of SUPPLIER_DOCS) {
     const reading = await analyst.readSupplierDoc({
@@ -100,6 +102,7 @@ export async function runKit15(
       text: doc.text,
     });
     parsed.set(doc.id, parseSupplierDoc(doc.reference, doc.supplier, doc.text));
+    readings.set(doc.id, reading);
     logger.detail(`${doc.reference} · ${doc.supplier}`, reading.rationale);
     for (const quote of reading.citedEvidence) logger.detail('Cited', `"${quote}"`);
   }
@@ -181,12 +184,7 @@ export async function runKit15(
   logger.chapter('Decide and act — approve the valid, hold the doubtful');
   for (const doc of SUPPLIER_DOCS) {
     const terms = parsed.get(doc.id)!;
-    const reading = await analyst.readSupplierDoc({
-      supplier: doc.supplier,
-      reference: doc.reference,
-      text: doc.text,
-    });
-    const decision = decideOnboarding(terms, reading);
+    const decision = decideOnboarding(terms, readings.get(doc.id)!);
     decisions.push(decision);
     await logger.step(`${doc.reference} — ${doc.supplier}`, async () => {
       logger.decision(decision.action, decision.reason);

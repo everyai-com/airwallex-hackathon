@@ -53,9 +53,10 @@ export async function runKit12(client: AirwallexClient, logger: Logger): Promise
   client.seedMockBalances({ ...CLOSING_CASH });
   if (!client.isMock) {
     await logger.step('Sandbox setup — fund the wallet to the scenario closing cash', async () => {
+      const opening = await getBalances(client);
       for (const currency of ['USD', 'EUR'] as const) {
         const target = CLOSING_CASH[currency];
-        const current = balanceOf(await getBalances(client), currency);
+        const current = balanceOf(opening, currency);
         if (current + 0.01 < target) {
           const account = await ensureGlobalAccount(client, currency);
           await simulateDeposit(client, {

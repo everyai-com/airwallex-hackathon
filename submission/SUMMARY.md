@@ -30,6 +30,7 @@ npm test                        # 65 passing tests
 ## Contents
 
 - Web dashboard (`web/`) running all eighteen kits mock-or-live in the browser
+- Pitch (`submission/PITCH.md`): 30-second hook, differentiation, numbers, 90-second demo script, Q&A prep
 - Kits 1–18 as described in `README.md`, each following the same narrative shape:
   goal → initial plan → new information → revised decision → financial outcome or escalation.
 - `submission/CHALLENGE.md` — every official challenge domain mapped to a kit, plus the

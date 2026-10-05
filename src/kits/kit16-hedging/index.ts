@@ -69,9 +69,10 @@ export async function runKit16(
     // Fund up to the scenario starts; above-scenario wallets just work —
     // the policy hedges relative exposure, not absolute levels.
     await logger.step('Sandbox setup — fund the wallet to the scenario starts', async () => {
+      const opening = await getBalances(client);
       for (const currency of ['USD', 'EUR', 'GBP'] as const) {
         const target = HEDGE_STARTING_BALANCES[currency];
-        const current = balanceOf(await getBalances(client), currency);
+        const current = balanceOf(opening, currency);
         if (current + 0.01 < target) {
           const account = await ensureGlobalAccount(client, currency);
           await simulateDeposit(client, {

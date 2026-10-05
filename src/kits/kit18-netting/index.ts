@@ -137,8 +137,9 @@ export async function runKit18(
   if (!client.isMock) {
     await logger.step('Sandbox setup — fund the net debits', async () => {
       const totals = settlementTotals(settlements);
+      const opening = await getBalances(client);
       for (const [currency, amount] of Object.entries(totals)) {
-        const current = balanceOf(await getBalances(client), currency);
+        const current = balanceOf(opening, currency);
         if (current + 0.01 < amount) {
           const account = await ensureGlobalAccount(client, currency);
           await simulateDeposit(client, {

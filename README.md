@@ -1,10 +1,29 @@
 # Airwallex Developer Lab — Agentic Starter (Kits 1–18)
 
+[![verify](https://github.com/everyai-com/airwallex-hackathon/actions/workflows/verify.yml/badge.svg)](https://github.com/everyai-com/airwallex-hackathon/actions)
+![kits](https://img.shields.io/badge/kits-18-blue)
+![live-verified](https://img.shields.io/badge/live--verified-11-green)
+![tests](https://img.shields.io/badge/tests-65_passing-green)
+![demos](https://img.shields.io/badge/demo_videos-12-orange)
+
 A TypeScript starter for the Airwallex sandbox hackathon, built around one rule:
 **the model reads, the code decides, the API moves the money.** Eighteen starter kits share a typed
 REST client, a platform/connected-account layer, a policy layer, an approval gate, an in-memory
 sandbox simulator, and merchant Agentic Commerce + finance-ops simulators so every demo runs end
-to end with or without credentials.
+to end with or without credentials. Eleven kits move real sandbox money; twelve
+[demo videos](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04)
+show them doing it in real time.
+
+```mermaid
+flowchart LR
+    A[Analyst<br/>Claude + heuristic fallback] -->|judgment + citations<br/>never amounts| P[Policy<br/>pure TypeScript]
+    P -->|decisions| G[Approval gate<br/>bound to evidence]
+    G -->|approved ops| C[Typed REST client<br/>idempotent request ids]
+    C -->|live| S[(Airwallex sandbox)]
+    C -->|mock| M[(In-memory simulator)]
+    S -->|state| R[Reconcile<br/>identity holds or throw]
+    M -->|state| R
+```
 
 | Kit | Command | The decision |
 | --- | --- | --- |
@@ -434,6 +453,7 @@ REST here on purpose.
 ```sh
 npm run typecheck
 npm test          # node:test — policy unit tests + all eighteen kits end to end in mock mode
+npm run verify    # typecheck + tests + all eighteen kits end to end (the same gate CI runs)
 ```
 
 ## Extending

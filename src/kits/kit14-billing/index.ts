@@ -12,6 +12,8 @@ import {
 } from '../../api/billing.js';
 import { ensureGlobalAccount, simulateDeposit } from '../../api/global-accounts.js';
 import { createAnalyst, type ContractReading } from '../../core/analyst.js';
+// NOTE: ContractReading is stored after the first read and reused — each
+// contract text is sent to the analyst exactly once per run.
 import { ApprovalGate } from '../../core/approvals.js';
 import type { AirwallexClient } from '../../core/client.js';
 import type { Logger } from '../../core/log.js';
@@ -77,6 +79,7 @@ export async function runKit14(
   );
 
   const parsed = new Map<string, ParsedContract>();
+  const readings = new Map<string, ContractReading>();
   logger.chapter('Observe — the analyst reads, the parser measures');
   for (const contract of CONTRACTS) {
     const reading = await analyst.readContract({
@@ -86,6 +89,7 @@ export async function runKit14(
     });
     const terms = parseContract(contract.reference, contract.customer, contract.currency, contract.text);
     parsed.set(contract.id, terms);
+    readings.set(contract.id, reading);
     logger.detail(
       `${contract.reference} · ${contract.customer}`,
       `${reading.rationale} Total ${formatAmount(contractTotal(terms), terms.currency)}, Net ${terms.netDays}.`,
@@ -159,11 +163,7 @@ export async function runKit14(
   logger.chapter('Decide and act — bill what is due, hold what is not');
   for (const contract of CONTRACTS) {
     const terms = parsed.get(contract.id)!;
-    const reading = await analyst.readContract({
-      customer: contract.customer,
-      reference: contract.reference,
-      text: contract.text,
-    });
+    const reading = readings.get(contract.id)!;
     const decision = decideBilling(terms, reading, { delivered: false });
     decisions.push(decision);
     await logger.step(`${contract.reference} — ${contract.customer}`, async () => {
@@ -229,12 +229,7 @@ export async function runKit14(
   const cascade = CONTRACTS.find((entry) => entry.id === 'msa-milestones')!;
   if (deliveryConfirmed(deliveryReading, DELIVERY_CONFIRMATION.text)) {
     const terms = parsed.get(cascade.id)!;
-    const reading = await analyst.readContract({
-      customer: cascade.customer,
-      reference: cascade.reference,
-      text: cascade.text,
-    });
-    const revised = decideBilling(terms, reading, { delivered: true });
+    const revised = decideBilling(terms, readings.get(cascade.id)!, { delivered: true });
     decisions.push(revised);
     logger.decision('REVISED', revised.reason);
     for (const milestone of revised.dueMilestones) {
