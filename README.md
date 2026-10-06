@@ -269,6 +269,13 @@ session is paid on the hosted test page (sandbox card `4035501000000008`), produ
 a merchant order number; repeating the completion with the same `request_id` returns that same
 order — the retry contract never creates a second charge (one payment intent, one order).
 
+Before the payment, the merchant verifies the agent itself with **Visa's Trusted Agent Protocol**
+(RFC 9421 message signatures, `src/core/tap.ts`): the agent signs `@method`/`@authority`/`@path`
+with an Ed25519 key registered in the agent registry, and the merchant allows the signed request,
+refuses a tampered one (`bad_signature`), and refuses a replay (`replayed`). See
+`submission/SPONSORS.md` for how each sponsor prize (Visa, Metal, Claude, AWS, Coinbase, tZERO,
+Base44) maps onto the repo.
+
 ### Kit 11 — Invoice-Matching Reconciliation Agent (`src/kits/kit11-reconciliation`)
 
 The receive-money loop the challenge opens with. Eight bank-feed receipts land against an open AR

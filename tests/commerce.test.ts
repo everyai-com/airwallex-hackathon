@@ -279,4 +279,9 @@ test('kit10 refuses the stale checkout, completes the revised one, and replays t
   const snapshot = mockSnapshot(client);
   assert.equal(snapshot.paymentIntents.length, 1, 'exactly one payment intent was charged');
   assert.equal(String(snapshot.paymentIntents[0]?.status), 'SUCCEEDED');
+
+  assert.equal(result.tap.verified, true, 'the merchant verified the TAP-signed agent request');
+  assert.equal(result.tap.agentId, 'agentic-shopper-1');
+  assert.equal(result.tap.tamperRefused, true, 'a tampered request fails TAP verification');
+  assert.equal(result.tap.replayRefused, true, 'a replayed signature is refused');
 });

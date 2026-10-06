@@ -1,6 +1,14 @@
 import type { AirwallexClient } from '../../core/client.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount } from '../../core/money.js';
+import {
+  generateTapAgent,
+  signTapRequest,
+  TapAgentRegistry,
+  TapReplayGuard,
+  tapAgentRegistryEntry,
+  verifyTapRequest,
+} from '../../core/tap.js';
 import { buildCatalog, type SearchResult } from '../commerce-catalog.js';
 import {
   MerchantService,
@@ -21,6 +29,7 @@ export interface Kit10Result {
   searchSample: SearchResult;
   checkouts: MerchantCheckout[];
   orders: MerchantOrder[];
+  tap: { agentId: string; verified: boolean; tamperRefused: boolean; replayRefused: boolean };
 }
 
 /**
@@ -172,6 +181,70 @@ export async function runKit10(client: AirwallexClient, logger: Logger): Promise
   );
 
   const completionRequestId = ids.forOperation('kit10-complete');
+
+  logger.chapter('Visa Trusted Agent Protocol — the merchant verifies the agent, not a prompt');
+  const tapAgent = generateTapAgent({ agentId: 'agentic-shopper-1' });
+  const tapRegistry = new TapAgentRegistry();
+  tapRegistry.register(tapAgentRegistryEntry(tapAgent));
+  const tapReplayGuard = new TapReplayGuard();
+  const tapRequest = {
+    method: 'POST',
+    authority: 'sandbox.merchant.example',
+    path: `/checkout/${revised.id}/complete`,
+    query: `request_id=${completionRequestId}`,
+  };
+  const tapHeaders = signTapRequest({ key: tapAgent, ...tapRequest, tag: 'agent-payer-auth' });
+  let agentVerified = '';
+  let tamperRefused = false;
+  let replayRefused = false;
+
+  await logger.step('The agent signs its checkout request (Ed25519, RFC 9421)', async () => {
+    logger.detail('Signature-Input', `${tapHeaders['Signature-Input'].slice(0, 110)}...`);
+    const verified = verifyTapRequest({
+      ...tapRequest,
+      headers: tapHeaders,
+      registry: tapRegistry,
+      replayGuard: tapReplayGuard,
+    });
+    if (!verified.valid) throw new Error(`TAP verification failed: ${verified.code} — ${verified.detail}`);
+    agentVerified = verified.agentId;
+    logger.detail('Verified agent', `${verified.agentId} (keyId ${verified.keyId}, tag ${verified.tag})`);
+    logger.decision(
+      'ALLOW',
+      'The merchant verified cryptographic agent identity and authorization before taking the payment.',
+    );
+  });
+
+  await logger.step('A tampered request fails verification', async () => {
+    const tampered = verifyTapRequest({
+      ...tapRequest,
+      path: '/checkout/mch_other/complete',
+      headers: tapHeaders,
+      registry: tapRegistry,
+      replayGuard: tapReplayGuard,
+    });
+    if (tampered.valid) throw new Error('Tampered request unexpectedly verified.');
+    tamperRefused = true;
+    logger.detail('Result', `${tampered.code} — ${tampered.detail}`);
+    logger.decision(
+      'REFUSE',
+      'The signature is bound to the merchant domain and path; a modified request cannot verify.',
+    );
+  });
+
+  await logger.step('A replayed signature is refused', async () => {
+    const replayed = verifyTapRequest({
+      ...tapRequest,
+      headers: tapHeaders,
+      registry: tapRegistry,
+      replayGuard: tapReplayGuard,
+    });
+    if (replayed.valid) throw new Error('Replay unexpectedly verified.');
+    replayRefused = true;
+    logger.detail('Result', `${replayed.code} — ${replayed.detail}`);
+    logger.decision('REFUSE', 'Nonces are single-use; a captured request cannot be replayed.');
+  });
+
   const completion = await merchant.completeCheckout({
     checkoutId: revised.id,
     requestId: completionRequestId,
@@ -219,5 +292,11 @@ export async function runKit10(client: AirwallexClient, logger: Logger): Promise
     searchSample: machineSearch,
     checkouts: merchant.listCheckouts(),
     orders: merchant.listOrders(),
+    tap: {
+      agentId: agentVerified,
+      verified: agentVerified !== '',
+      tamperRefused,
+      replayRefused,
+    },
   };
 }
