@@ -188,9 +188,33 @@ Thanks!
 - **Sandbox balances** are simulated and unlimited — there is no credit to claim;
   `POST /simulation/deposit/create` funds you instantly, as many times as you like.
   Nothing to request from anyone.
-- **Prizes** (USD 70k pool) are awarded by the judges after submission — the only way
-  to "get" them is to submit a strong build. Kit 1 is the recommended recipe; see
-  `submission/DEMO.md` for the script that shows it off.
+- **Prizes** ($100K pool) are awarded by the judges after submission — the only way
+  to "get" them is to submit a strong build. Founder's Choice $30K + Judges' Choice $20K
+  are open; the Visa $15K needs Visa + Airwallex tooling and the Metal $15K needs Metal +
+  Airwallex tooling. Kit 1 is the recommended recipe; see `submission/DEMO.md`.
+
+## Official timeline & submission (answered Oct 5)
+
+Source: [airwallex.hackerearth.com](https://airwallex.hackerearth.com/) — registration open.
+
+| Date | Milestone |
+| --- | --- |
+| Oct 5 – Oct 23 | Registration & Idea Phase (apply now; applications close Oct 23) |
+| Oct 25 | Accepted teams notified; official build period begins |
+| Nov 13 | **Project submissions due** |
+| Nov 15 | Finalists selected |
+| Nov 19 | Demo Day in San Francisco (remote participation optional) |
+
+**Required deliverables (per the FAQ):** a working demo, a short video walkthrough
+**under five minutes**, and a link to the repository **with setup instructions**.
+Team size 1–4. Register via
+[the HackerEarth page](https://www.hackerearth.com/community/challenges/hackathon/agentic-banking-hackathon/?register=true)
+(sign-in required).
+
+**Repo readiness:** working demo ✓ (`npm run all --mock`, CI-verified from a fresh
+clone); repo link + setup instructions ✓ (README quick start); the <5-minute
+consolidated walkthrough is the one artifact to produce during the build phase
+(the release already has 12 per-kit live clips to edit from).
 
 ## Tracking
 
@@ -200,8 +224,8 @@ Thanks!
 | 2 | Native Payment Acceptance (confirm) | Kit 4 live | sent Oct 4; partially open — intent create/list work, confirm still returns "not enabled for native API access" (verified Oct 4) |
 | 3 | Airi CLI allowlist + card budget | Kit 9 live | sent Oct 4; awaiting reply; kit 9 built and running in mock mode |
 | 4 | Merchant-side Agentic Commerce | Kit 10 live | sent Oct 4; awaiting reply; kit 10 built with an in-process merchant simulator |
-| 5 | Credit / partner-credit program | — | sent Oct 4; awaiting reply |
-| 6 | Submission deadline + judging criteria | Submission | sent Oct 4; awaiting reply |
+| 5 | Credit / partner-credit program | — | partially answered by the challenge page: Claude $10K credits listed; AWS + Base44 TBD; Airwallex-specific credits still pending |
+| 6 | Submission deadline + judging criteria | Submission | ANSWERED Oct 5 — see the official timeline below |
 
 ## When enablement lands — runbook
 
