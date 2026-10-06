@@ -8,8 +8,15 @@ import { buildCatalog, buildOffer, searchProducts } from '../src/kits/commerce-c
 import {
   checkoutBlockReason,
   MerchantService,
+  signTapCompletionProof,
   type MerchantCheckout,
 } from '../src/kits/commerce-merchant.js';
+import {
+  generateTapAgent,
+  TapAgentRegistry,
+  TapReplayGuard,
+  tapAgentRegistryEntry,
+} from '../src/core/tap.js';
 import { runKit9 } from '../src/kits/kit9-shopping/index.js';
 import {
   AiriReportGuard,
@@ -223,6 +230,79 @@ test('completing a different checkout with a used request_id is refused', async 
   assert.equal(second.status, 'ACTIVE', 'the conflicting checkout is not charged');
 });
 
+test('a TAP-enforced merchant refuses unsigned, retargeted, and replayed completions', async () => {
+  const agent = generateTapAgent({ agentId: 'test-shopper' });
+  const registry = new TapAgentRegistry();
+  registry.register(tapAgentRegistryEntry(agent));
+  const service = new MerchantService(testClient(), { tap: { registry, replayGuard: new TapReplayGuard() } });
+  service.loadCatalog(buildCatalog());
+  const card = {
+    number: '4035501000000008',
+    expiryMonth: '12',
+    expiryYear: '2027',
+    cvc: '123',
+    name: 'Sandbox Shopper',
+  };
+
+  const checkout = service.createCheckout({ requestId: 'req-tap-1', items: [CHECKOUT_ITEM] });
+  const other = service.createCheckout({ requestId: 'req-tap-2', items: [CHECKOUT_ITEM] });
+
+  const unsigned = await service.completeCheckout({
+    checkoutId: checkout.id,
+    requestId: 'req-tap-complete',
+    payment: { type: 'card', card },
+  });
+  assert.equal(unsigned.ok, false);
+  assert.equal(unsigned.ok === false ? unsigned.code : '', 'tap_required');
+
+  const proof = signTapCompletionProof({
+    agent,
+    checkoutId: checkout.id,
+    requestId: 'req-tap-complete',
+    paymentType: 'card',
+  });
+  const retargeted = await service.completeCheckout({
+    checkoutId: other.id,
+    requestId: 'req-tap-other',
+    payment: { type: 'card', card },
+    tap: { ...proof, path: `/checkout/${other.id}/complete` },
+  });
+  assert.equal(retargeted.ok, false);
+  assert.equal(retargeted.ok === false ? retargeted.code : '', 'tap_rejected');
+  assert.equal(other.status, 'ACTIVE', 'the retargeted checkout is not charged');
+
+  const completion = await service.completeCheckout({
+    checkoutId: checkout.id,
+    requestId: 'req-tap-complete',
+    payment: { type: 'card', card },
+    tap: proof,
+  });
+  assert.equal(completion.ok, true);
+
+  const replayedAttack = await service.completeCheckout({
+    checkoutId: checkout.id,
+    requestId: 'req-tap-complete',
+    payment: { type: 'card', card },
+    tap: proof,
+  });
+  assert.equal(replayedAttack.ok, false);
+  assert.equal(replayedAttack.ok === false ? replayedAttack.code : '', 'tap_rejected');
+
+  const retry = await service.completeCheckout({
+    checkoutId: checkout.id,
+    requestId: 'req-tap-complete',
+    payment: { type: 'card', card },
+    tap: signTapCompletionProof({
+      agent,
+      checkoutId: checkout.id,
+      requestId: 'req-tap-complete',
+      paymentType: 'card',
+    }),
+  });
+  assert.equal(retry.ok, true);
+  assert.equal(retry.ok === true ? retry.replayed : false, true, 'a fresh signature replays the same order');
+});
+
 // --- Kit 9 end to end --------------------------------------------------------
 
 test('kit9 re-approves on a material change and reports before retrying the Airi payment', async () => {
@@ -246,6 +326,8 @@ test('kit9 re-approves on a material change and reports before retrying the Airi
   );
   assert.equal(result.order.totalUsd, 484);
   assert.match(result.order.merchantOrderNumber, /^MO-\d{4}-\d{4}$/);
+  assert.equal(result.tap.agentId, 'approval-bound-shopper');
+  assert.equal(result.tap.verified, true, 'the shopper carried a TAP key the merchant verified');
 
   const snapshot = mockSnapshot(client);
   assert.equal(snapshot.paymentIntents.length, 2, 'one failed intent and one successful retry');
@@ -282,6 +364,7 @@ test('kit10 refuses the stale checkout, completes the revised one, and replays t
 
   assert.equal(result.tap.verified, true, 'the merchant verified the TAP-signed agent request');
   assert.equal(result.tap.agentId, 'agentic-shopper-1');
-  assert.equal(result.tap.tamperRefused, true, 'a tampered request fails TAP verification');
+  assert.equal(result.tap.unsignedRefused, true, 'an unsigned completion is refused before any charge');
+  assert.equal(result.tap.tamperRefused, true, 'a retargeted signature fails TAP verification');
   assert.equal(result.tap.replayRefused, true, 'a replayed signature is refused');
 });

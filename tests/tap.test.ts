@@ -73,6 +73,47 @@ test('tap: tampering the path, method or registry invalidates verification', () 
   if (!unknown.valid) assert.equal(unknown.code, 'unregistered_agent');
 });
 
+test('tap: RSA-PSS-SHA256 agents verify, and algorithm mismatches are refused', () => {
+  const rsa = generateTapAgent({ agentId: 'rsa-shopper', algorithm: 'rsa-pss-sha256' });
+  assert.equal(rsa.algorithm, 'rsa-pss-sha256');
+  const registry = new TapAgentRegistry();
+  registry.register(tapAgentRegistryEntry(rsa));
+
+  const body = '{"checkout_id":"mch_1","request_id":"req-1"}';
+  const headers = signTapRequest({ key: rsa, ...REQUEST, tag: 'agent-payer-auth', body });
+  assert.ok(headers['Content-Digest']?.startsWith('sha-512=:'));
+
+  const ok = verifyTapRequest({ ...REQUEST, headers, registry, body });
+  assert.equal(ok.valid, true);
+  if (ok.valid) assert.equal(ok.agentId, 'rsa-shopper');
+
+  const relabeled = {
+    ...headers,
+    'Signature-Input': headers['Signature-Input'].replace('rsa-pss-sha256', 'ed25519'),
+  };
+  const mismatch = verifyTapRequest({ ...REQUEST, headers: relabeled, registry, body });
+  assert.equal(mismatch.valid, false);
+  if (!mismatch.valid) assert.equal(mismatch.code, 'unsupported_algorithm');
+});
+
+test('tap: a tampered body fails the content-digest binding', () => {
+  const { registry, key } = setup();
+  const body = '{"checkout_id":"mch_1","request_id":"req-1"}';
+  const headers = signTapRequest({ key, ...REQUEST, tag: 'agent-payer-auth', body });
+
+  const tampered = verifyTapRequest({
+    ...REQUEST,
+    headers,
+    registry,
+    body: '{"checkout_id":"mch_2","request_id":"req-1"}',
+  });
+  assert.equal(tampered.valid, false);
+  if (!tampered.valid) assert.equal(tampered.code, 'digest_mismatch');
+
+  const intact = verifyTapRequest({ ...REQUEST, headers, registry, body });
+  assert.equal(intact.valid, true);
+});
+
 test('tap: expired signatures and modified headers are refused', () => {
   const { registry, key } = setup();
   const created = 1_800_000_000;

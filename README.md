@@ -3,7 +3,7 @@
 [![verify](https://github.com/everyai-com/airwallex-hackathon/actions/workflows/verify.yml/badge.svg)](https://github.com/everyai-com/airwallex-hackathon/actions)
 ![kits](https://img.shields.io/badge/kits-18-blue)
 ![live-verified](https://img.shields.io/badge/live--verified-11-green)
-![tests](https://img.shields.io/badge/tests-65_passing-green)
+![tests](https://img.shields.io/badge/tests-71_passing-green)
 ![demos](https://img.shields.io/badge/demo_videos-12-orange)
 
 A TypeScript starter for the Airwallex sandbox hackathon, built around one rule:
@@ -269,12 +269,13 @@ session is paid on the hosted test page (sandbox card `4035501000000008`), produ
 a merchant order number; repeating the completion with the same `request_id` returns that same
 order — the retry contract never creates a second charge (one payment intent, one order).
 
-Before the payment, the merchant verifies the agent itself with **Visa's Trusted Agent Protocol**
-(RFC 9421 message signatures, `src/core/tap.ts`): the agent signs `@method`/`@authority`/`@path`
-with an Ed25519 key registered in the agent registry, and the merchant allows the signed request,
-refuses a tampered one (`bad_signature`), and refuses a replay (`replayed`). See
-`submission/SPONSORS.md` for how each sponsor prize (Visa, Metal, Claude, AWS, Coinbase, tZERO,
-Base44) maps onto the repo.
+The merchant enforces **Visa's Trusted Agent Protocol** (RFC 9421 message signatures,
+`src/core/tap.ts`) on the completion path itself: every completion carries an `agent-payer-auth`
+signature (Ed25519 or RSA-PSS-SHA256) over method, merchant domain, path, query, and a
+`Content-Digest` of the completion body. Unsigned completions are refused with `tap_required`;
+forged, retargeted, or replayed ones with `tap_rejected` — before any checkout rule runs. Kit 9's
+shopper carries the key and signs both Airi attempts. See `submission/SPONSORS.md` for how each
+sponsor prize (Visa, Metal, Claude, AWS, Coinbase, tZERO, Base44) maps onto the repo.
 
 ### Kit 11 — Invoice-Matching Reconciliation Agent (`src/kits/kit11-reconciliation`)
 
@@ -483,3 +484,10 @@ npm run verify    # typecheck + tests + all eighteen kits end to end (the same g
 ## Safety
 
 Sandbox only: synthetic counterparties, no real money, no live credentials. Never commit `.env`.
+
+## Contributing
+
+This repo is open source (MIT) and contributions are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the ground rules (mock-first, idempotent,
+model-reads/code-decides) and [SECURITY.md](SECURITY.md) for reporting secrets or
+vulnerabilities. Good first issues are labeled `good first issue`.

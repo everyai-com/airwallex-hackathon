@@ -11,13 +11,23 @@
  *   revised checkout instead of a silent charge;
  * - a checkout expires one hour after creation;
  * - completing with a request_id that already produced an order returns that
- *   order — retries never create a second charge.
+ *   order — retries never create a second charge;
+ * - when constructed with TAP enforcement, the completion path verifies a
+ *   Visa Trusted Agent Protocol signature first — unsigned or forged
+ *   completions are refused before any checkout rule is even evaluated.
  */
 
 import { randomUUID } from 'node:crypto';
 import { confirmPaymentIntent, createPaymentIntent } from '../api/payments.js';
 import type { AirwallexClient } from '../core/client.js';
 import { round2 } from '../core/money.js';
+import {
+  signTapRequest,
+  verifyTapRequest,
+  type TapAgentKey,
+  type TapAgentRegistry,
+  type TapReplayGuard,
+} from '../core/tap.js';
 import type { Product, ProductQuery, SearchResult } from './commerce-catalog.js';
 import { searchProducts } from './commerce-catalog.js';
 
@@ -106,7 +116,9 @@ export type CompletionResult =
         | 'checkout_not_found'
         | 'request_id_conflict'
         | 'payment_declined'
-        | 'payment_error';
+        | 'payment_error'
+        | 'tap_required'
+        | 'tap_rejected';
       detail: string;
       failureReason?: string;
       paymentIntentId?: string;
@@ -162,12 +174,63 @@ export interface CreateCheckoutInput {
   ttlMs?: number;
 }
 
+/** Visa TAP proof the agent attaches to a completion request. */
+export interface TapCompletionProof {
+  method: string;
+  authority: string;
+  path: string;
+  query?: string;
+  headers: Record<string, string | undefined>;
+  body?: string;
+}
+
+export interface MerchantTapEnforcement {
+  registry: TapAgentRegistry;
+  replayGuard?: TapReplayGuard;
+}
+
+/** Merchant domain TAP completion signatures bind to. */
+export const TAP_MERCHANT_AUTHORITY = 'sandbox.merchant.example';
+
+/**
+ * Shopper-side helper: sign a TAP completion proof (`agent-payer-auth` over
+ * method, merchant domain, path, query, and a Content-Digest of the body).
+ */
+export function signTapCompletionProof(input: {
+  agent: TapAgentKey;
+  checkoutId: string;
+  requestId: string;
+  paymentType: 'card' | 'airi';
+  authority?: string;
+}): TapCompletionProof {
+  const authority = input.authority ?? TAP_MERCHANT_AUTHORITY;
+  const body = JSON.stringify({
+    checkout_id: input.checkoutId,
+    request_id: input.requestId,
+    payment_type: input.paymentType,
+  });
+  const path = `/checkout/${input.checkoutId}/complete`;
+  const query = `request_id=${input.requestId}`;
+  const headers = signTapRequest({
+    key: input.agent,
+    method: 'POST',
+    authority,
+    path,
+    query,
+    tag: 'agent-payer-auth',
+    body,
+  });
+  return { method: 'POST', authority, path, query, headers, body };
+}
+
 export interface CompleteCheckoutInput {
   checkoutId: string;
   requestId: string;
   payment: PaymentInput;
   /** Sandbox only: force a declined attempt to exercise report-before-retry. */
   simulateFailureReason?: string;
+  /** Required when the merchant was constructed with TAP enforcement. */
+  tap?: TapCompletionProof;
 }
 
 export class MerchantService {
@@ -179,7 +242,14 @@ export class MerchantService {
   private readonly reports: AiriReport[] = [];
   private orderSequence = 1000;
 
-  constructor(private readonly client: AirwallexClient) {}
+  private readonly tapEnforcement?: MerchantTapEnforcement;
+
+  constructor(
+    private readonly client: AirwallexClient,
+    opts?: { tap?: MerchantTapEnforcement },
+  ) {
+    this.tapEnforcement = opts?.tap;
+  }
 
   loadCatalog(products: Product[]): void {
     this.catalog = products.map((product) => ({ ...product }));
@@ -253,6 +323,34 @@ export class MerchantService {
   }
 
   async completeCheckout(input: CompleteCheckoutInput): Promise<CompletionResult> {
+    if (this.tapEnforcement) {
+      const proof = input.tap;
+      if (!proof) {
+        return {
+          ok: false,
+          code: 'tap_required',
+          detail: `Checkout ${input.checkoutId} requires a Visa TAP agent signature; the unsigned completion was refused.`,
+        };
+      }
+      const verified = verifyTapRequest({
+        method: proof.method,
+        authority: proof.authority,
+        path: proof.path,
+        ...(proof.query !== undefined ? { query: proof.query } : {}),
+        headers: proof.headers,
+        registry: this.tapEnforcement.registry,
+        ...(this.tapEnforcement.replayGuard ? { replayGuard: this.tapEnforcement.replayGuard } : {}),
+        ...(proof.body !== undefined ? { body: proof.body } : {}),
+      });
+      if (!verified.valid) {
+        return {
+          ok: false,
+          code: 'tap_rejected',
+          detail: `TAP verification failed (${verified.code}): ${verified.detail} The completion was refused.`,
+        };
+      }
+    }
+
     const replay = this.ordersByRequestId.get(input.requestId);
     if (replay) {
       if (replay.checkoutId !== input.checkoutId) {

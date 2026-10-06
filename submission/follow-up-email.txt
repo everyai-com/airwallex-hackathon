@@ -25,8 +25,8 @@ marketplace kits) — STILL GATED
 - Hackathon / partner credit claim process
 - Submission deadline, deliverables, judging criteria
 
-Sandbox email: everyai.com@gmail.com
-Client ID: syR3NR61QFGC8KQUY1MmOA
+Sandbox email: <AWX_SANDBOX_EMAIL from submission/.env.applications>
+Client ID: <AWX_CLIENT_ID from submission/.env.applications>
 
 Thanks!
 Phanindra

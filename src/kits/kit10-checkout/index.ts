@@ -3,15 +3,14 @@ import type { Logger } from '../../core/log.js';
 import { formatAmount } from '../../core/money.js';
 import {
   generateTapAgent,
-  signTapRequest,
   TapAgentRegistry,
   TapReplayGuard,
   tapAgentRegistryEntry,
-  verifyTapRequest,
 } from '../../core/tap.js';
 import { buildCatalog, type SearchResult } from '../commerce-catalog.js';
 import {
   MerchantService,
+  signTapCompletionProof,
   type MerchantCheckout,
   type MerchantOrder,
 } from '../commerce-merchant.js';
@@ -29,7 +28,13 @@ export interface Kit10Result {
   searchSample: SearchResult;
   checkouts: MerchantCheckout[];
   orders: MerchantOrder[];
-  tap: { agentId: string; verified: boolean; tamperRefused: boolean; replayRefused: boolean };
+  tap: {
+    agentId: string;
+    verified: boolean;
+    unsignedRefused: boolean;
+    tamperRefused: boolean;
+    replayRefused: boolean;
+  };
 }
 
 /**
@@ -40,7 +45,10 @@ export interface Kit10Result {
  */
 export async function runKit10(client: AirwallexClient, logger: Logger): Promise<Kit10Result> {
   const ids = client.requestIds();
-  const merchant = new MerchantService(client);
+  const tapAgent = generateTapAgent({ agentId: 'agentic-shopper-1' });
+  const tapRegistry = new TapAgentRegistry();
+  tapRegistry.register(tapAgentRegistryEntry(tapAgent));
+  const merchant = new MerchantService(client, { tap: { registry: tapRegistry, replayGuard: new TapReplayGuard() } });
   const catalog = buildCatalog();
   merchant.loadCatalog(catalog);
 
@@ -131,10 +139,12 @@ export async function runKit10(client: AirwallexClient, logger: Logger): Promise
   logger.chapter('New information: the supplier price changes after the snapshot');
   merchant.updatePrice('GAGGIA-EVO-ROAST', 479);
   logger.info('The merchant price feed moved GAGGIA-EVO-ROAST from USD 469.00 to USD 479.00.');
+  const staleRequestId = ids.fresh();
   const staleAttempt = await merchant.completeCheckout({
     checkoutId: checkout.id,
-    requestId: ids.fresh(),
+    requestId: staleRequestId,
     payment: { type: 'card', card: TEST_CARD },
+    tap: signTapCompletionProof({ agent: tapAgent, checkoutId: checkout.id, requestId: staleRequestId, paymentType: 'card' }),
   });
   logger.detail(
     'Complete attempt',
@@ -151,10 +161,12 @@ export async function runKit10(client: AirwallexClient, logger: Logger): Promise
     items: [{ sku: 'GAGGIA-EVO-ROAST', quantity: 1, shippingCode: 'EXPEDITED' }],
     ttlMs: 0,
   });
+  const expiredRequestId = ids.fresh();
   const expiredAttempt = await merchant.completeCheckout({
     checkoutId: expiring.id,
-    requestId: ids.fresh(),
+    requestId: expiredRequestId,
     payment: { type: 'card', card: TEST_CARD },
+    tap: signTapCompletionProof({ agent: tapAgent, checkoutId: expiring.id, requestId: expiredRequestId, paymentType: 'card' }),
   });
   logger.detail(
     'Checkout with ttl 0',
@@ -183,85 +195,104 @@ export async function runKit10(client: AirwallexClient, logger: Logger): Promise
   const completionRequestId = ids.forOperation('kit10-complete');
 
   logger.chapter('Visa Trusted Agent Protocol — the merchant verifies the agent, not a prompt');
-  const tapAgent = generateTapAgent({ agentId: 'agentic-shopper-1' });
-  const tapRegistry = new TapAgentRegistry();
-  tapRegistry.register(tapAgentRegistryEntry(tapAgent));
-  const tapReplayGuard = new TapReplayGuard();
-  const tapRequest = {
-    method: 'POST',
-    authority: 'sandbox.merchant.example',
-    path: `/checkout/${revised.id}/complete`,
-    query: `request_id=${completionRequestId}`,
-  };
-  const tapHeaders = signTapRequest({ key: tapAgent, ...tapRequest, tag: 'agent-payer-auth' });
+  logger.info(
+    'Every completion on this merchant carries a TAP signature; the merchant verifies it before any checkout rule runs.',
+  );
   let agentVerified = '';
+  let unsignedRefused = false;
   let tamperRefused = false;
   let replayRefused = false;
 
-  await logger.step('The agent signs its checkout request (Ed25519, RFC 9421)', async () => {
-    logger.detail('Signature-Input', `${tapHeaders['Signature-Input'].slice(0, 110)}...`);
-    const verified = verifyTapRequest({
-      ...tapRequest,
-      headers: tapHeaders,
-      registry: tapRegistry,
-      replayGuard: tapReplayGuard,
+  await logger.step('An unsigned completion is refused', async () => {
+    const unsigned = await merchant.completeCheckout({
+      checkoutId: revised.id,
+      requestId: ids.fresh(),
+      payment: { type: 'card', card: TEST_CARD },
     });
-    if (!verified.valid) throw new Error(`TAP verification failed: ${verified.code} — ${verified.detail}`);
-    agentVerified = verified.agentId;
-    logger.detail('Verified agent', `${verified.agentId} (keyId ${verified.keyId}, tag ${verified.tag})`);
-    logger.decision(
-      'ALLOW',
-      'The merchant verified cryptographic agent identity and authorization before taking the payment.',
-    );
+    if (unsigned.ok || unsigned.code !== 'tap_required') {
+      throw new Error('Expected the unsigned completion to be refused with tap_required.');
+    }
+    unsignedRefused = true;
+    logger.detail('Result', `${unsigned.code} — ${unsigned.detail}`);
+    logger.decision('REFUSE', 'No agent signature, no charge — authentication precedes authorization.');
   });
 
-  await logger.step('A tampered request fails verification', async () => {
-    const tampered = verifyTapRequest({
-      ...tapRequest,
-      path: '/checkout/mch_other/complete',
-      headers: tapHeaders,
-      registry: tapRegistry,
-      replayGuard: tapReplayGuard,
-    });
-    if (tampered.valid) throw new Error('Tampered request unexpectedly verified.');
-    tamperRefused = true;
-    logger.detail('Result', `${tampered.code} — ${tampered.detail}`);
-    logger.decision(
-      'REFUSE',
-      'The signature is bound to the merchant domain and path; a modified request cannot verify.',
-    );
+  const completionProof = signTapCompletionProof({
+    agent: tapAgent,
+    checkoutId: revised.id,
+    requestId: completionRequestId,
+    paymentType: 'card',
   });
 
-  await logger.step('A replayed signature is refused', async () => {
-    const replayed = verifyTapRequest({
-      ...tapRequest,
-      headers: tapHeaders,
-      registry: tapRegistry,
-      replayGuard: tapReplayGuard,
-    });
-    if (replayed.valid) throw new Error('Replay unexpectedly verified.');
-    replayRefused = true;
-    logger.detail('Result', `${replayed.code} — ${replayed.detail}`);
-    logger.decision('REFUSE', 'Nonces are single-use; a captured request cannot be replayed.');
+  await logger.step('The agent signs its completion (Ed25519, RFC 9421, body-bound)', async () => {
+    logger.detail('Signature-Input', `${completionProof.headers['Signature-Input']?.slice(0, 110) ?? ''}...`);
+    logger.detail('Content-Digest', `${completionProof.headers['Content-Digest']?.slice(0, 60) ?? ''}...`);
+    logger.detail('Body', completionProof.body ?? '');
   });
 
   const completion = await merchant.completeCheckout({
     checkoutId: revised.id,
     requestId: completionRequestId,
     payment: { type: 'card', card: TEST_CARD },
+    tap: completionProof,
   });
   if (!completion.ok) throw new Error(`Hosted test payment failed: ${completion.detail}`);
+  agentVerified = tapAgent.agentId;
+  logger.decision(
+    'ALLOW',
+    'The merchant verified cryptographic agent identity and authorization before taking the payment.',
+  );
   logger.detail('Hosted test payment', 'card 4035 5010 0000 0008 accepted');
   logger.detail('Order', `${completion.order.merchantOrderNumber} ${completion.order.status}`);
   logger.detail('Payment intent', completion.order.paymentIntentId);
 
+  await logger.step('A retargeted signature is refused at the completion path', async () => {
+    const retargeted = await merchant.completeCheckout({
+      checkoutId: checkout.id,
+      requestId: ids.fresh(),
+      payment: { type: 'card', card: TEST_CARD },
+      tap: { ...completionProof, path: `/checkout/${checkout.id}/complete` },
+    });
+    if (retargeted.ok || retargeted.code !== 'tap_rejected') {
+      throw new Error('Expected the retargeted completion to be refused with tap_rejected.');
+    }
+    tamperRefused = true;
+    logger.detail('Result', `${retargeted.code} — ${retargeted.detail}`);
+    logger.decision(
+      'REFUSE',
+      'The signature is bound to the merchant domain, path, and body; a signature lifted onto another checkout cannot verify.',
+    );
+  });
+
+  await logger.step('A replayed signature is refused at the completion path', async () => {
+    const replayed = await merchant.completeCheckout({
+      checkoutId: revised.id,
+      requestId: completionRequestId,
+      payment: { type: 'card', card: TEST_CARD },
+      tap: completionProof,
+    });
+    if (replayed.ok || replayed.code !== 'tap_rejected') {
+      throw new Error('Expected the replayed completion to be refused with tap_rejected.');
+    }
+    replayRefused = true;
+    logger.detail('Result', `${replayed.code} — ${replayed.detail}`);
+    logger.decision('REFUSE', 'Nonces are single-use; a captured completion cannot be replayed.');
+  });
+
+  const retryProof = signTapCompletionProof({
+    agent: tapAgent,
+    checkoutId: revised.id,
+    requestId: completionRequestId,
+    paymentType: 'card',
+  });
   const replayCompletion = await merchant.completeCheckout({
     checkoutId: revised.id,
     requestId: completionRequestId,
     payment: { type: 'card', card: TEST_CARD },
+    tap: retryProof,
   });
   logger.detail(
-    'Same completion request_id',
+    'Same completion request_id, fresh signature',
     replayCompletion.ok && replayCompletion.replayed
       ? `${replayCompletion.order.id} — the same order is returned, no second charge`
       : 'UNEXPECTED: the retry did not replay the order',
@@ -295,6 +326,7 @@ export async function runKit10(client: AirwallexClient, logger: Logger): Promise
     tap: {
       agentId: agentVerified,
       verified: agentVerified !== '',
+      unsignedRefused,
       tamperRefused,
       replayRefused,
     },

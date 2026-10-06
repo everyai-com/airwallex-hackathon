@@ -114,7 +114,7 @@ domain — reconciliation, treasury, collections, payouts, spend policy, close �
 ## 4. Submission checklist
 
 - [x] `npm run typecheck` clean
-- [x] `npm test` — 65 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, connected-account payload shape, billing parser/decisions, and effect assertions on all eighteen kits)
+- [x] `npm test` — 71 passing tests (policy unit tests, idempotency, commerce state machines, finance-ops identities, connected-account payload shape, billing parser/decisions, and effect assertions on all eighteen kits)
 - [x] `npx tsx src/cli.ts all --mock` exits 0
 - [x] Live sandbox run of Kit 1 completed against the real sandbox (2026-10-04): LOCAL transfer PAID, confidence drop → approval gate, FX conversion SETTLED, SWIFT payout PAID
 - [x] Live-verified kits 1–3 and 11–18 against the sandbox (kits 14–16 live Oct 5: real invoices issued/collected/reconciled; 3 suppliers onboarded with PAID verifications; FX exposure hedged with rebalanced conversions; webhook deliveries reconciled/retried/deduped/escalated; 11 intercompany legs netted to 7 PAID transfers); kit 4 partially open (intent create/list work, confirm still gated — verified Oct 4); kits 5–8 still gated at business onboarding (verified Oct 4, repo payload fixed); kits 9–10 await the Airi/merchant replies (all tracked in `enablement-requests.md`)

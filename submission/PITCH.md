@@ -42,7 +42,7 @@ moving real test money through transfers, FX, invoices, cards and deposits.
 | ------ | ----- |
 | Starter kits | 18 across 6 challenge domains + billing, onboarding, hedging, webhooks, netting |
 | Live-verified on `api.sandbox.airwallex.com` | 11 (kits 1–3, 11–18) |
-| Tests (`node:test`, zero-config) | 65 passing |
+| Tests (`node:test`, zero-config) | 71 passing |
 | Demo videos (real-time, no credentials) | 12 assets on the [live release](https://github.com/everyai-com/airwallex-hackathon/releases/tag/live-kit1-demo-2026-10-04) |
 | Dashboard | all 18 kits runnable mock-or-live in the browser |
 | Gated kits with exact live errors documented | 6 (kits 4–10, tracked in `enablement-requests.md`) |

@@ -9,15 +9,31 @@
  * This is the integration the Visa Award looks for: an agent proves its
  * identity and its authorization to the merchant before checkout, and the
  * merchant decides from the cryptographic evidence rather than a prompt.
+ *
+ * Algorithms follow Visa's TAP samples: Ed25519 and RSA-PSS-SHA256. When the
+ * caller passes a body, the signer emits an RFC 9421 `Content-Digest` header
+ * and covers it, so the signature binds the request bytes end to end.
  */
 
-import { createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, verify } from 'node:crypto';
+import {
+  constants as cryptoConstants,
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomUUID,
+  sign,
+  verify,
+} from 'node:crypto';
 
 export type TapTag = 'agent-browser-auth' | 'agent-payer-auth';
+
+export type TapAlgorithm = 'ed25519' | 'rsa-pss-sha256';
 
 export interface TapAgentKey {
   agentId: string;
   keyId: string;
+  algorithm: TapAlgorithm;
   publicKeyPem: string;
   privateKeyPem: string;
 }
@@ -25,6 +41,7 @@ export interface TapAgentKey {
 export type TapSignedHeaders = Record<string, string | undefined> & {
   'Signature-Input': string;
   Signature: string;
+  'Content-Digest'?: string;
 };
 
 export interface TapVerifyInput {
@@ -38,6 +55,13 @@ export interface TapVerifyInput {
   nowSeconds?: number;
   /** Allowed clock skew for created/expires, in seconds. Default 60. */
   skewSeconds?: number;
+  /**
+   * The received request body. When `content-digest` is a covered component
+   * the verifier recomputes the digest from this body and refuses mismatches;
+   * omit it only when the body is unavailable, in which case the header stays
+   * signature-bound but is not recomputed.
+   */
+  body?: string;
 }
 
 export type TapVerifyResult =
@@ -51,6 +75,7 @@ export type TapVerifyResult =
         | 'unsupported_algorithm'
         | 'not_yet_valid'
         | 'expired'
+        | 'digest_mismatch'
         | 'bad_signature'
         | 'replayed';
       detail: string;
@@ -81,16 +106,82 @@ export class TapReplayGuard {
   }
 }
 
-export const TAP_ALGORITHM = 'ed25519';
+export const TAP_ALGORITHM: TapAlgorithm = 'ed25519';
 
-export function generateTapAgent(input: { agentId: string; keyId?: string }): TapAgentKey {
+export const TAP_ALGORITHMS: readonly TapAlgorithm[] = ['ed25519', 'rsa-pss-sha256'];
+
+export function generateTapAgent(input: {
+  agentId: string;
+  keyId?: string;
+  algorithm?: TapAlgorithm;
+}): TapAgentKey {
+  const algorithm = input.algorithm ?? TAP_ALGORITHM;
+  const keyId = input.keyId ?? `${input.agentId}-key-1`;
+  if (algorithm === 'rsa-pss-sha256') {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    return { agentId: input.agentId, keyId, algorithm, publicKeyPem: publicKey, privateKeyPem: privateKey };
+  }
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   return {
     agentId: input.agentId,
-    keyId: input.keyId ?? `${input.agentId}-key-1`,
+    keyId,
+    algorithm,
     publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
   };
+}
+
+/** The TAP algorithm a registry PEM actually carries, from its key type. */
+export function tapAlgorithmForPublicKey(publicKeyPem: string): TapAlgorithm | undefined {
+  try {
+    const keyType = createPublicKey(publicKeyPem).asymmetricKeyType;
+    if (keyType === 'rsa') return 'rsa-pss-sha256';
+    if (keyType === 'ed25519') return 'ed25519';
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function tapSign(algorithm: TapAlgorithm, privateKeyPem: string, base: Buffer): Buffer {
+  if (algorithm === 'rsa-pss-sha256') {
+    return sign('sha256', base, {
+      key: createPrivateKey(privateKeyPem),
+      padding: cryptoConstants.RSA_PKCS1_PSS_PADDING,
+      saltLength: cryptoConstants.RSA_PSS_SALTLEN_DIGEST,
+    });
+  }
+  return sign(null, base, createPrivateKey(privateKeyPem));
+}
+
+function tapVerifySignature(
+  algorithm: TapAlgorithm,
+  publicKeyPem: string,
+  base: Buffer,
+  signature: Buffer,
+): boolean {
+  try {
+    if (algorithm === 'rsa-pss-sha256') {
+      return verify(
+        'sha256',
+        base,
+        { key: createPublicKey(publicKeyPem), padding: cryptoConstants.RSA_PKCS1_PSS_PADDING, saltLength: cryptoConstants.RSA_PSS_SALTLEN_DIGEST },
+        signature,
+      );
+    }
+    return verify(null, base, createPublicKey(publicKeyPem), signature);
+  } catch {
+    return false;
+  }
+}
+
+/** RFC 9421 `Content-Digest` value binding a request body (`sha-512`). */
+export function tapContentDigest(body: string): string {
+  return `sha-512=:${createHash('sha512').update(body, 'utf8').digest('base64')}:`;
 }
 
 export function tapAgentRegistryEntry(agent: TapAgentKey): {
@@ -108,6 +199,7 @@ function signatureBase(input: {
   query?: string;
   components: string[];
   paramsValue: string;
+  headerValues?: Record<string, string>;
 }): string {
   const lines: string[] = [];
   for (const component of input.components) {
@@ -125,7 +217,7 @@ function signatureBase(input: {
         lines.push(`"@query": ?${input.query ?? ''}`);
         break;
       default:
-        lines.push(`"${component}": `);
+        lines.push(`"${component}": ${input.headerValues?.[component] ?? ''}`);
         break;
     }
   }
@@ -136,7 +228,8 @@ function signatureBase(input: {
 /**
  * Produce RFC 9421 `Signature-Input` + `Signature` headers for a request.
  * Covered components default to `@method`, `@authority`, `@path` (and `@query`
- * when present); params carry created/expires/nonce/keyid/alg/tag.
+ * when present); params carry created/expires/nonce/keyid/alg/tag. When `body`
+ * is passed, a `Content-Digest` header is emitted and covered too.
  */
 export function signTapRequest(input: {
   key: TapAgentKey;
@@ -149,14 +242,18 @@ export function signTapRequest(input: {
   created?: number;
   expires?: number;
   nonce?: string;
+  /** Request body bytes to bind via `Content-Digest`. */
+  body?: string;
 }): TapSignedHeaders {
   const created = input.created ?? Math.floor(Date.now() / 1000);
   const expires = input.expires ?? created + 300;
   const nonce = input.nonce ?? randomUUID();
   const components = input.query ? ['@method', '@authority', '@path', '@query'] : ['@method', '@authority', '@path'];
+  const digest = input.body === undefined ? undefined : tapContentDigest(input.body);
+  if (digest) components.push('content-digest');
   const paramsValue =
     `(${components.map((component) => `"${component}"`).join(' ')});` +
-    `created=${created};keyid="${input.key.keyId}";alg="${TAP_ALGORITHM}";` +
+    `created=${created};keyid="${input.key.keyId}";alg="${input.key.algorithm}";` +
     `expires=${expires};nonce="${nonce}";tag="${input.tag}"`;
 
   const base = signatureBase({
@@ -166,12 +263,14 @@ export function signTapRequest(input: {
     ...(input.query !== undefined ? { query: input.query } : {}),
     components,
     paramsValue,
+    ...(digest ? { headerValues: { 'content-digest': digest } } : {}),
   });
 
-  const signature = sign(null, Buffer.from(base, 'utf8'), createPrivateKey(input.key.privateKeyPem));
+  const signature = tapSign(input.key.algorithm, input.key.privateKeyPem, Buffer.from(base, 'utf8'));
   return {
     'Signature-Input': `sig1=${paramsValue}`,
     Signature: `sig1=:${signature.toString('base64')}:`,
+    ...(digest ? { 'Content-Digest': digest } : {}),
   };
 }
 
@@ -235,13 +334,22 @@ export function verifyTapRequest(input: TapVerifyInput): TapVerifyResult {
   if (!keyId || !nonce) {
     return { valid: false, code: 'malformed_signature_input', detail: 'keyid and nonce are required parameters.' };
   }
-  if ((params.alg ?? TAP_ALGORITHM) !== TAP_ALGORITHM) {
-    return { valid: false, code: 'unsupported_algorithm', detail: `Only ${TAP_ALGORITHM} is supported here, got ${params.alg}.` };
-  }
 
   const registered = input.registry.lookup(keyId);
   if (!registered) {
     return { valid: false, code: 'unregistered_agent', detail: `No registry entry for keyId ${keyId}.` };
+  }
+
+  const claimed = params.alg ?? TAP_ALGORITHM;
+  if (!TAP_ALGORITHMS.includes(claimed as TapAlgorithm)) {
+    return { valid: false, code: 'unsupported_algorithm', detail: `Only ${TAP_ALGORITHMS.join(' and ')} are supported here, got ${claimed}.` };
+  }
+  const keyAlgorithm = tapAlgorithmForPublicKey(registered.publicKeyPem);
+  if (!keyAlgorithm) {
+    return { valid: false, code: 'unsupported_algorithm', detail: `Registry key ${keyId} is not an Ed25519 or RSA key.` };
+  }
+  if (claimed !== keyAlgorithm) {
+    return { valid: false, code: 'unsupported_algorithm', detail: `Signature claims ${claimed} but registry key ${keyId} is ${keyAlgorithm}.` };
   }
 
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
@@ -260,6 +368,22 @@ export function verifyTapRequest(input: TapVerifyInput): TapVerifyResult {
     return { valid: false, code: 'malformed_signature_input', detail: `Signature header did not parse: ${signatureHeader.slice(0, 80)}` };
   }
 
+  const headerValues: Record<string, string> = {};
+  for (const component of components) {
+    if (component.startsWith('@')) continue;
+    const value = headerValue(input.headers, component);
+    if (value === undefined) {
+      return { valid: false, code: 'missing_headers', detail: `Covered component "${component}" has no ${component} header.` };
+    }
+    headerValues[component] = value;
+  }
+  if (components.includes('content-digest') && input.body !== undefined) {
+    const expected = tapContentDigest(input.body);
+    if (headerValues['content-digest'] !== expected) {
+      return { valid: false, code: 'digest_mismatch', detail: 'The request body does not match the covered Content-Digest.' };
+    }
+  }
+
   const paramsValue = signatureInput.slice('sig1='.length);
   const base = signatureBase({
     method: input.method,
@@ -268,21 +392,17 @@ export function verifyTapRequest(input: TapVerifyInput): TapVerifyResult {
     ...(input.query !== undefined ? { query: input.query } : {}),
     components,
     paramsValue,
+    headerValues,
   });
 
-  let signatureOk = false;
-  try {
-    signatureOk = verify(
-      null,
-      Buffer.from(base, 'utf8'),
-      createPublicKey(registered.publicKeyPem),
-      Buffer.from(signatureValue, 'base64'),
-    );
-  } catch {
-    signatureOk = false;
-  }
+  const signatureOk = tapVerifySignature(
+    keyAlgorithm,
+    registered.publicKeyPem,
+    Buffer.from(base, 'utf8'),
+    Buffer.from(signatureValue, 'base64'),
+  );
   if (!signatureOk) {
-    return { valid: false, code: 'bad_signature', detail: 'Ed25519 verification failed for the constructed signature base.' };
+    return { valid: false, code: 'bad_signature', detail: `${keyAlgorithm} verification failed for the constructed signature base.` };
   }
 
   if (input.replayGuard && !input.replayGuard.record(nonce)) {

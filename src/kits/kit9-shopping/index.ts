@@ -3,7 +3,18 @@ import type { AirwallexClient } from '../../core/client.js';
 import type { Logger } from '../../core/log.js';
 import { formatAmount } from '../../core/money.js';
 import { buildCatalog, offersFrom, type PurchaseOffer } from '../commerce-catalog.js';
-import { MerchantService, type AiriReport, type MerchantOrder } from '../commerce-merchant.js';
+import {
+  MerchantService,
+  signTapCompletionProof,
+  type AiriReport,
+  type MerchantOrder,
+} from '../commerce-merchant.js';
+import {
+  generateTapAgent,
+  TapAgentRegistry,
+  TapReplayGuard,
+  tapAgentRegistryEntry,
+} from '../../core/tap.js';
 import {
   AiriReportGuard,
   fingerprintChanges,
@@ -32,6 +43,7 @@ export interface Kit9Result {
   approvals: Kit9ApprovalRecord[];
   attempts: RecordedAttempt[];
   reports: AiriReport[];
+  tap: { agentId: string; verified: boolean };
 }
 
 /**
@@ -47,7 +59,10 @@ export async function runKit9(
 ): Promise<Kit9Result> {
   const ids = client.requestIds();
   const gate = new ApprovalGate({ autoApprove: options.autoApprove });
-  const merchant = new MerchantService(client);
+  const tapAgent = generateTapAgent({ agentId: 'approval-bound-shopper' });
+  const tapRegistry = new TapAgentRegistry();
+  tapRegistry.register(tapAgentRegistryEntry(tapAgent));
+  const merchant = new MerchantService(client, { tap: { registry: tapRegistry, replayGuard: new TapReplayGuard() } });
   merchant.loadCatalog(buildCatalog());
 
   const mission = {
@@ -194,6 +209,10 @@ export async function runKit9(
 
   logger.chapter('Payment — Airi one-click, every result reported before a retry');
   const guard = new AiriReportGuard();
+  logger.detail(
+    'TAP identity',
+    `Shopper agent ${tapAgent.agentId} signs every completion (Visa TAP); the merchant verifies before charging.`,
+  );
 
   const attempt1RequestId = ids.fresh();
   const attempt1 = await merchant.completeCheckout({
@@ -201,6 +220,7 @@ export async function runKit9(
     requestId: attempt1RequestId,
     payment: { type: 'airi', email: AIRI_SHOPPER_EMAIL },
     simulateFailureReason: 'AUTHENTICATION_EXPIRED',
+    tap: signTapCompletionProof({ agent: tapAgent, checkoutId: checkout.id, requestId: attempt1RequestId, paymentType: 'airi' }),
   });
   if (attempt1.ok) throw new Error('Expected the first Airi attempt to be declined.');
   const attempt1Id = attempt1.paymentIntentId ?? attempt1RequestId;
@@ -232,6 +252,7 @@ export async function runKit9(
     checkoutId: checkout.id,
     requestId: attempt2RequestId,
     payment: { type: 'airi', email: AIRI_SHOPPER_EMAIL },
+    tap: signTapCompletionProof({ agent: tapAgent, checkoutId: checkout.id, requestId: attempt2RequestId, paymentType: 'airi' }),
   });
   if (!attempt2.ok) throw new Error(`The Airi retry failed: ${attempt2.detail}`);
   const order = attempt2.order;
@@ -283,6 +304,7 @@ export async function runKit9(
     approvals,
     attempts: guard.history(),
     reports: [report1, report2],
+    tap: { agentId: tapAgent.agentId, verified: true },
   };
 }
 

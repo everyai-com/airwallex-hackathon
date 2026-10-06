@@ -9,7 +9,7 @@ shipped, tested code, not a promise.
 
 | Prize | Requirement | Status | Where it lives |
 | --- | --- | --- | --- |
-| Founder's Choice $30K | Open | Ready | Whole repo — 18 kits, 65+ tests, live-verified on Airwallex sandbox |
+| Founder's Choice $30K | Open | Ready | Whole repo — 18 kits, 71 tests, live-verified on Airwallex sandbox |
 | Judges' Choice $20K | Open | Ready | `submission/` pitch + 12 live demo clips |
 | **Visa $15K** | Visa + Airwallex tooling | **Shipped (v1), parity work scheduled** | `src/core/tap.ts`, Kit 10 chapter, `tests/tap.test.ts` |
 | **Metal $15K** | Metal + Airwallex tooling | Planned, adapter interface next | `src/api/settlement-chain.ts` (planned) |
@@ -28,21 +28,25 @@ merchant and this exact operation, and (c) that the signed request is fresh and 
 Tags: `agent-browser-auth`, `agent-payer-auth`. Algorithms: Ed25519 (recommended) and RSA-PSS-SHA256.
 
 **Shipped now.**
-- `src/core/tap.ts` — Ed25519 request signing (`signTapRequest`) producing RFC 9421
-  `Signature-Input`/`Signature` headers over `@method`, `@authority`, `@path` (+`@query`),
-  merchant-side verification (`verifyTapRequest`) with an agent registry and nonce replay guard.
-- Kit 10 ("Merchant-Enabled Agentic Checkout") now opens with the merchant verifying the agent:
-  signed request → ALLOW; tampered path → REFUSE (`bad_signature`); replayed headers → REFUSE
-  (`replayed`). Recorded on `Kit10Result.tap` and asserted in `tests/commerce.test.ts`.
-- `tests/tap.test.ts` — round-trip, cross-request tamper, unregistered key, expiry, replay.
+- `src/core/tap.ts` — request signing (`signTapRequest`) for **both** TAP algorithms
+  (Ed25519 and RSA-PSS-SHA256), producing RFC 9421 `Signature-Input`/`Signature` headers over
+  `@method`, `@authority`, `@path` (+`@query`), plus `Content-Digest` body binding when a body
+  is passed; merchant-side verification (`verifyTapRequest`) with an agent registry, a
+  registry-authoritative algorithm check, and a nonce replay guard.
+- The merchant **enforces** TAP on `completeCheckout` (`src/kits/commerce-merchant.ts`):
+  unsigned → `tap_required`; forged/retargeted/replayed → `tap_rejected` — before any checkout
+  rule runs. Kit 9's shopper carries the key and signs both Airi attempts.
+- Kit 10 ("Merchant-Enabled Agentic Checkout") walks the full enforcement path: unsigned
+  refused, signed + body-bound completion → ALLOW, retargeted signature → REFUSE, replayed
+  signature → REFUSE, fresh signature + same `request_id` → same order. Recorded on
+  `Kit10Result.tap` and asserted in `tests/commerce.test.ts`.
+- `tests/tap.test.ts` — Ed25519 and RSA round-trips, algorithm-label mismatch, body-tamper
+  (`digest_mismatch`), cross-request tamper, unregistered key, expiry, replay.
 
 **Build phase.**
-1. RSA-PSS-SHA256 parity so both TAP algorithms verify.
-2. Body binding: add `Content-Digest` (RFC 9530) so the signature covers the completion payload.
-3. Interop: run Visa's sample agent-registry/CDN-proxy locally and verify our signatures against
+1. Interop: run Visa's sample agent-registry/CDN-proxy locally and verify our signatures against
    their verifier (and ours against their tap-agent's signatures).
-4. Require TAP on the `completeCheckout` path in Kit 10; Kit 9's shopper carries the key.
-5. Demo clip: the merchant refusing an unregistered agent and a replay, then accepting the signed one.
+2. Demo clip: the merchant refusing an unregistered agent and a replay, then accepting the signed one.
 
 **Access needed:** Visa developer center account, TAP sample repo already public; ask the event
 Slack for the Visa sponsor channel.

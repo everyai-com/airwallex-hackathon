@@ -24,7 +24,7 @@ attached to the repo's releases.
 ```sh
 npm install
 npx tsx src/cli.ts all --mock   # all eighteen kits end to end, exit 0, no credentials
-npm test                        # 65 passing tests
+npm test                        # 71 passing tests
 ```
 
 ## Contents
