@@ -150,10 +150,27 @@ export interface PlatformReport {
  */
 export async function createPlatformReport(
   client: AirwallexClient,
-  input: { type: 'BALANCE_REPORT' | 'SETTLEMENT_REPORT' | 'PAYOUT_REPORT'; fileFormat: 'CSV' | 'XLSX' | 'PDF' },
+  input: {
+    type:
+      | 'BALANCE_REPORT'
+      | 'TRANSACTION_RECON_REPORT'
+      | 'PAYOUT_REPORT'
+      | 'ACCOUNT_REPORT'
+      | 'ISSUING_TRANSACTION_REPORT'
+      | 'APPLICATION_FEE_REPORT';
+    fileFormat: 'CSV' | 'XLSX' | 'PDF';
+    /** TRANSACTION_RECON_REPORT requires one of the created/updated windows. */
+    fromCreatedAt?: string;
+    toCreatedAt?: string;
+  },
 ): Promise<PlatformReport> {
   const response = await client.request<Record<string, unknown>>('/api/v1/platform_reports/create', {
-    body: { type: input.type, file_format: input.fileFormat },
+    body: {
+      type: input.type,
+      file_format: input.fileFormat,
+      ...(input.fromCreatedAt ? { from_created_at: input.fromCreatedAt } : {}),
+      ...(input.toCreatedAt ? { to_created_at: input.toCreatedAt } : {}),
+    },
   });
   return {
     id: String(response.id ?? ''),

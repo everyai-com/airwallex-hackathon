@@ -1181,6 +1181,31 @@ export class MockTransport implements Transport {
     if (method === 'POST' && path === '/api/v1/platform_reports/create') {
       // type is validated before file_format.
       if (!body.type) fail(400, 'field_required', 'type is required.');
+      const platformReportTypes = [
+        'TRANSACTION_RECON_REPORT',
+        'PAYOUT_REPORT',
+        'BALANCE_REPORT',
+        'ACCOUNT_REPORT',
+        'ISSUING_TRANSACTION_REPORT',
+        'APPLICATION_FEE_REPORT',
+      ];
+      if (!platformReportTypes.includes(String(body.type))) {
+        fail(400, 'invalid_argument', `${String(body.type)} is not a valid value`);
+      }
+      // Live requires a date window on the reconciliation report.
+      if (
+        body.type === 'TRANSACTION_RECON_REPORT' &&
+        !body.from_created_at &&
+        !body.to_created_at &&
+        !body.from_updated_at &&
+        !body.to_updated_at
+      ) {
+        fail(
+          400,
+          'invalid_argument',
+          'Please provide either [from_created_at], [to_created_at] or [from_updated_at], [to_updated_at] correctly',
+        );
+      }
       if (!body.file_format) fail(400, 'field_required', 'file_format is required.');
       const report = {
         id: `rpt_${randomUUID().slice(0, 8)}`,

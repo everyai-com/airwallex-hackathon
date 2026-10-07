@@ -53,15 +53,28 @@ export async function runKit8(client: AirwallexClient, logger: Logger): Promise<
   });
 
   await logger.step('Fund the platform wallet to exactly what the sellers are owed', async () => {
-    const globalAccount = await ensureGlobalAccount(client, 'USD');
-    await simulateDeposit(client, {
-      globalAccountId: globalAccount.id,
-      amount: 15_800,
-      payerName: 'Marketplace buyer settlements',
-    });
+    const owedTotal = round2(sellers.reduce((total, seller) => total + seller.owed, 0));
+    const current = usdBalance(await getBalances(client));
+    // The mock starts at the seeded 14,200, so the top-up lands on the owed
+    // total exactly. Live wallets carry other platform money too: only top up
+    // what is missing, and let the delta check below prove the money trail.
+    const topUp = round2(Math.max(0, owedTotal - current));
+    if (topUp > 0) {
+      const globalAccount = await ensureGlobalAccount(client, 'USD');
+      await simulateDeposit(client, {
+        globalAccountId: globalAccount.id,
+        amount: topUp,
+        payerName: 'Marketplace buyer settlements',
+      });
+    }
     const balance = usdBalance(await getBalances(client));
-    logger.detail('Platform wallet', `USD ${round2(balance)} = sellers' owed total`);
+    logger.detail(
+      'Platform wallet',
+      `USD ${round2(balance)} (topped up USD ${topUp} against sellers' owed USD ${owedTotal})`,
+    );
   });
+
+  const startPlatformUsd = usdBalance(await getBalances(client));
 
   const sellerAccounts: SellerAccount[] = sellers.map((seller) => ({
     id: accountIds.get(seller.key)!,
@@ -149,8 +162,9 @@ export async function runKit8(client: AirwallexClient, logger: Logger): Promise<
     const owesTotal = round2(sellers.reduce((total, seller) => total + seller.owed, 0));
     const check = reconcile(owesTotal, settlements, refundRecovery, refundRecovery);
     const actualPlatform = usdBalance(await getBalances(client));
-    const expectedPlatform = round2(heldReservesUsd + refundRecovery);
-    const walletMatches = Math.abs(actualPlatform - expectedPlatform) <= 0.01;
+    const movedOut = round2(startPlatformUsd - actualPlatform);
+    const expectedMovedOut = round2(check.payoutsUsd - refundRecovery);
+    const walletMatches = Math.abs(movedOut - expectedMovedOut) <= 0.01;
     logger.detail('Owed to sellers', `USD ${owesTotal}`);
     logger.detail('Payouts', `USD ${check.payoutsUsd}`);
     logger.detail('Reserves held', `USD ${check.reservesUsd}`);
@@ -164,11 +178,18 @@ export async function runKit8(client: AirwallexClient, logger: Logger): Promise<
     );
     logger.detail(
       'Wallet check',
-      `USD ${round2(actualPlatform)} on hand vs USD ${expectedPlatform} expected (reserves ${heldReservesUsd} + refund coverage ${refundRecovery}) — ${walletMatches ? 'matches' : 'MISMATCH'}`,
+      `moved USD ${movedOut} out of the wallet vs USD ${expectedMovedOut} expected (payouts ${check.payoutsUsd} − refund recovery ${refundRecovery}) — ${walletMatches ? 'matches' : 'MISMATCH'}`,
+    );
+    logger.detail(
+      'Seller money retained',
+      `USD ${round2(heldReservesUsd + refundRecovery)} (reserves ${heldReservesUsd} + refund coverage ${refundRecovery})`,
     );
     const report = await createPlatformReport(client, {
-      type: 'SETTLEMENT_REPORT',
+      type: 'TRANSACTION_RECON_REPORT',
       fileFormat: 'CSV',
+      // Live requires a date window for the reconciliation report.
+      fromCreatedAt: sandboxIso(Date.now() - 24 * 60 * 60 * 1_000),
+      toCreatedAt: sandboxIso(Date.now() + 24 * 60 * 60 * 1_000),
     });
     logger.detail('Report', `${report.id} ${report.status} — ${report.url ?? 'pending'}`);
   });
@@ -187,4 +208,9 @@ export async function runKit8(client: AirwallexClient, logger: Logger): Promise<
 
 function usdBalance(balances: { currency: string; available: number }[]): number {
   return balances.find((line) => line.currency === 'USD')?.available ?? 0;
+}
+
+/** Airwallex timestamps: ISO8601 UTC with a +0000 suffix. */
+function sandboxIso(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, '+0000');
 }
