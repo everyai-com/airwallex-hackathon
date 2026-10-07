@@ -75,6 +75,33 @@ export async function createFxQuote(
   return { id, rate, ...(str(response.currency_pair) ? { currencyPair: str(response.currency_pair) } : {}) };
 }
 
+/**
+ * Live provisions a connected account's client-fee pricing schedule
+ * asynchronously after it goes ACTIVE: the first on-behalf-of quote can fail
+ * with `unconfigured_client_fee` for a few minutes. Retry with backoff; the
+ * mock answers on the first attempt.
+ */
+export async function createFxQuoteWhenReady(
+  client: AirwallexClient,
+  input: Parameters<typeof createFxQuote>[1],
+  attempts = 12,
+  delayMs = 20_000,
+): Promise<FxQuote> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await createFxQuote(client, input);
+    } catch (error) {
+      lastError = error;
+      if (!isAirwallexError(error) || error.code !== 'unconfigured_client_fee') throw error;
+    }
+    await sleep(delayMs);
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 function toConversion(response: Record<string, unknown>, fallback: {
   buyCurrency: string;
   sellCurrency: string;

@@ -1,6 +1,6 @@
 import { getBalances, balanceOf } from '../../api/balances.js';
 import { createBeneficiary, euSwiftBeneficiary } from '../../api/beneficiaries.js';
-import { createFxConversion, createFxQuote, type FxQuote } from '../../api/fx.js';
+import { createFxConversion, createFxQuoteWhenReady, type FxQuote } from '../../api/fx.js';
 import { collectCharge, PLATFORM_REASONS } from '../../api/platform.js';
 import { advanceTransferToPaid, createTransfer } from '../../api/transfers.js';
 import type { AirwallexClient } from '../../core/client.js';
@@ -68,14 +68,25 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
 
   const acmeAccount = accountIds.get('acme')!;
 
+  // Live SWIFT fees are percentage-based (~0.4% of the amount); the mock models
+  // a flat fee. Budget with the larger of the two so the sizing conversion
+  // cannot leave the last payout a euro short (observed live: EUR 1.02 short).
+  const acmeFeePerPayout = client.isMock
+    ? PAYROLL_POLICY.swiftFeeEur
+    : Math.max(
+        PAYROLL_POLICY.swiftFeeEur,
+        round2(Math.max(...CONTRACTORS.acme!.map((contractor) => contractor.amount)) * 0.005),
+      );
+  const acmePolicy = { ...PAYROLL_POLICY, swiftFeeEur: acmeFeePerPayout };
+
   let acmeQuote: FxQuote | undefined;
   let acmeAssessment: PayrollAssessment | undefined;
   await logger.step("Price Acme's payroll with the rate Acme will actually trade at", async () => {
     const payrollTotal = round2(
       CONTRACTORS.acme!.reduce((total, item) => total + item.amount, 0) +
-        CONTRACTORS.acme!.length * PAYROLL_POLICY.swiftFeeEur,
+        CONTRACTORS.acme!.length * acmePolicy.swiftFeeEur,
     );
-    acmeQuote = await createFxQuote(client, {
+    acmeQuote = await createFxQuoteWhenReady(client, {
       requestId: ids.fresh(),
       sellCurrency: 'USD',
       buyCurrency: 'EUR',
@@ -86,6 +97,7 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
       CONTRACTORS.acme!,
       { USD: 1, EUR: roundTo(1 / acmeQuote.rate, 8) },
       { USD: 20_000 },
+      acmePolicy,
     );
     logger.detail(
       'Quote (execution rate)',
@@ -164,6 +176,7 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
     CONTRACTORS.borealis!,
     { USD: 1, EUR: roundTo(1 / acmeQuote!.rate, 8) },
     borealisWallet,
+    acmePolicy,
   );
   logger.detail('Required', `USD ${assessment.requiredUsd} (payroll + SWIFT fee)`);
   logger.detail('Available', `USD ${assessment.availableUsd}`);
@@ -208,7 +221,7 @@ export async function runKit6(client: AirwallexClient, logger: Logger): Promise<
   logger.chapter('Outcome');
   const platform = balanceOf(await getBalances(client), 'USD');
   logger.detail('Platform wallet', `USD ${round2(platform)} (fees collected, no tenant money touched)`);
-  logger.detail('Acme', `payroll paid: EUR ${formatAmount(6_000, 'EUR')} + EUR 25.70 SWIFT fees`);
+  logger.detail('Acme', `payroll paid: EUR ${formatAmount(6_000, 'EUR')} + EUR ${acmeAssessment?.swiftFees ?? 0} SWIFT fees budgeted`);
   logger.detail('Borealis', 'payroll HELD — awaiting its own funds; escalated to the employer');
   logger.detail('Cobalt', 'deposit received; fee collected; no payroll due');
 }

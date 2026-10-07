@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Config } from '../src/config.js';
+import { createFxQuoteWhenReady } from '../src/api/fx.js';
 import { AirwallexClient } from '../src/core/client.js';
+import { AirwallexError } from '../src/core/errors.js';
 import { createLogger } from '../src/core/log.js';
 import { MockTransport, type MockSnapshot } from '../src/core/mock.js';
 import {
@@ -61,6 +63,37 @@ function mockSnapshot(client: AirwallexClient): MockSnapshot {
 }
 
 // --- Receivables book --------------------------------------------------------
+
+test('an on-behalf FX quote retries while the client-fee schedule provisions', async () => {
+  let attempts = 0;
+  const stub = {
+    request: async () => {
+      attempts += 1;
+      if (attempts < 3) {
+        throw new AirwallexError({
+          status: 400,
+          code: 'unconfigured_client_fee',
+          message: "Unable to find relevant client fee in client's pricing schedule",
+        });
+      }
+      return { id: 'quote_1', client_rate: 1.1, currency_pair: 'USDEUR' };
+    },
+  } as unknown as AirwallexClient;
+  const quote = await createFxQuoteWhenReady(
+    stub,
+    {
+      requestId: 'probe-quote-1',
+      sellCurrency: 'USD',
+      buyCurrency: 'EUR',
+      buyAmount: 10,
+      onBehalfOf: 'acct_x',
+    },
+    5,
+    1,
+  );
+  assert.equal(quote.id, 'quote_1');
+  assert.equal(attempts, 3);
+});
 
 test('receivables helpers age, pay down and write off correctly', () => {
   const book = buildReceivables();

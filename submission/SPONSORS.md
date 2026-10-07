@@ -9,7 +9,7 @@ shipped, tested code, not a promise.
 
 | Prize | Requirement | Status | Where it lives |
 | --- | --- | --- | --- |
-| Founder's Choice $30K | Open | Ready | Whole repo — 18 kits, 71 tests, live-verified on Airwallex sandbox |
+| Founder's Choice $30K | Open | Ready | Whole repo — 18 kits, 74 tests, live-verified on Airwallex sandbox |
 | Judges' Choice $20K | Open | Ready | `submission/` pitch + 12 live demo clips |
 | **Visa $15K** | Visa + Airwallex tooling | **Shipped (v1), parity work scheduled** | `src/core/tap.ts`, Kit 10 chapter, `tests/tap.test.ts` |
 | **Metal $15K** | Metal + Airwallex tooling | Planned, adapter interface next | `src/api/settlement-chain.ts` (planned) |
@@ -17,7 +17,7 @@ shipped, tested code, not a promise.
 | AWS credits (TBD) | Use AWS / AgentCore | Planned | `deploy/agentcore/` (planned) |
 | Coinbase (CDP) | Partner tooling | Planned | `src/api/stablecoin-rail.ts` (planned) |
 | tZERO (T:0 = DayZero) | Partner tooling | Planned — strong fit with Kit 12 | `src/api/dayzero.ts` (planned) |
-| Base44 credits (TBD) | Use Base44 | Optional | Judge-facing dashboard rebuild |
+| Base44 credits ($16K) | Use Base44 | Optional | Judge-facing dashboard rebuild |
 
 ## Visa — Trusted Agent Protocol ($15K)
 
@@ -58,17 +58,19 @@ Metal L2 (OP-Stack Superchain). Tooling: docs.metalblockchain.org, docs.metall2.
 viem bridging, account abstraction, explorers), Metallicus-Partner-Resources (SDKs/contracts),
 Metal Pay Connect.
 
-**Plan.** Treat the chain as the *attestation layer for fiat settlement*, not a replacement rail:
-- `SettlementRegistry` contract on Metal L2 testnet: one event per Airwallex settlement leg,
-  carrying `transferId` hash, currency, amount, timestamp, counterparty hash.
-- Interface `SettlementChain` with two implementations: `MockSettlementChain` (offline demos,
-  deterministic) and `MetalL2SettlementChain` (viem, testnet RPC, faucet-funded, explorer link).
-- Wire into Kit 18 (intercompany netting) and Kit 10's merchant settlement receipt: every
-  fiat settlement gets an on-chain, independently checkable receipt. Both prize requirements in
-  one flow: Metal tooling + Airwallex tooling, provably.
+**Shipped now.**
+- `src/core/settlement-chain.ts` — `SettlementChain` interface with `MockSettlementChain`
+  (offline, deterministic, hash-linked receipts) and `MetalL2SettlementChain`, which fails
+  closed until faucet-funded `METAL_RPC_URL` / `METAL_PRIVATE_KEY` / `METAL_REGISTRY_ADDRESS`
+  are configured. Raw counterparties never touch the chain — only hashes.
+- Kit 18 attests every net settlement (7 receipts, chain verified before the run closes) and
+  Kit 10 attests the fiat settlement behind the merchant order. Same interface serves both
+  mock and live runs; the faucet flips the implementation via env only.
+- `tests/settlement-chain.test.ts` — link-up, determinism, tamper break-at-index, fail-closed.
 
-**Build phase.** Deploy to Metal L2 testnet (needs faucet funds), record tx hashes in the demo,
-add the explorer link to the video and README. Mock-first so judge runs work offline.
+**Build phase (needs faucet).** Fund the testnet wallet, deploy `SettlementRegistry`, wire the
+viem `writeContract` live leg (stubbed with the exact call in `MetalL2SettlementChain.attest`),
+record real tx hashes in the demo, add the explorer link to the video and README.
 
 **Access needed:** Superchain faucet, Metal Discord/Slack + partner-resources intro.
 
@@ -111,11 +113,11 @@ Adapter `DayZeroClient` (mock + live):
 **Access needed:** developer account at ondayzero.com/signup (`type=self-managed`), pilot/Slack intro
 via the event.
 
-## Base44 — demo console (credits TBD)
+## Base44 — demo console ($16K credits)
 
 Optional: build the judge-facing console (kit catalog, live run traces, sponsor-rail status) as a
 Base44 app reading the repo's JSON outputs. Low effort, visible polish; keep the repo itself the
-source of truth.
+source of truth. Credits figure now published on the challenge page: $16,000.
 
 ## Access asks (send via event Slack / partner channels)
 
