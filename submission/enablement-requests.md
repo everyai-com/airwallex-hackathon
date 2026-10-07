@@ -220,12 +220,39 @@ consolidated walkthrough is the one artifact to produce during the build phase
 
 | # | Item | Blocks | Status |
 | - | ---- | ------ | ------ |
-| 1 | Connected accounts + platform payments | Kits 5–8 live | sent Oct 4; still gated — live says "cannot onboard business accounts" (verified Oct 4). Repo payload fixed (primary_contact + agreements) so the kits run the moment the switch flips |
-| 2 | Native Payment Acceptance (confirm) | Kit 4 live | sent Oct 4; partially open — intent create/list work, confirm still returns "not enabled for native API access" (verified Oct 4) |
+| 1 | Connected accounts + platform payments | Kits 5–8 live | **ENABLED Oct 7** — business onboarding + on-behalf FX verified live end to end; kits 5–8 all green against the sandbox (see below). Repo needed: `business_structure`, `description_of_goods_or_services`, `industry_category_code`, `operating_country`, `product_reference`, person KYC fields, plus an activation-window retry and a client-fee-provisioning retry |
+| 2 | Native Payment Acceptance (confirm) | Kit 4 live | sent Oct 4; partially open — intent create/list work, confirm still returns "not enabled for native API access" (re-verified Oct 7) |
 | 3 | Airi CLI allowlist + card budget | Kit 9 live | sent Oct 4; awaiting reply; kit 9 built and running in mock mode |
 | 4 | Merchant-side Agentic Commerce | Kit 10 live | sent Oct 4; awaiting reply; kit 10 built with an in-process merchant simulator |
-| 5 | Credit / partner-credit program | — | partially answered by the challenge page: Claude $10K credits listed; AWS + Base44 TBD; Airwallex-specific credits still pending |
+| 5 | Credit / partner-credit program | — | partially answered by the challenge page: Claude $10K credits, Base44 $16K credits listed; AWS TBD; Airwallex-specific credits still pending |
 | 6 | Submission deadline + judging criteria | Submission | ANSWERED Oct 5 — see the official timeline below |
+
+## Oct 7 — kits 5–8 verified live (enablement #1)
+
+All four multi-tenant platform kits now run end to end against
+`sandbox.airwallex.com` and are committed:
+
+- **Kit 5 (platform spend):** 3 connected accounts onboarded and ACTIVE, wallets
+  funded on-behalf, cards issued, authorization decisions (APPROVED / LIMIT_EXCEEDED /
+  INSUFFICIENT_FUNDS), bridge advances settled and recovered, fees collected.
+- **Kit 6 (payroll):** connected accounts ACTIVE, on-behalf USD→EUR conversion
+  booked from a live quote, both contractors PAID, a genuinely short employer held
+  (USD 332.66 shortfall) with the cross-tenant guard, platform fees collected.
+- **Kit 7 (lending):** borrowers ACTIVE, revenue deposits, 8% collections settled,
+  reserve floor maintained, USD 15,000 advance disbursed.
+- **Kit 8 (marketplace):** sellers ACTIVE, reserves recomputed on new evidence,
+  three net payouts settled, USD 1,600 refund recovery charged, wallet delta check
+  matches exactly, reconciliation report requested.
+
+Live-only behaviors found and fixed while running (all committed with tests):
+account-onboarding field validation and the SUBMITTED→activate window; the
+client-fee pricing schedule provisioning lag on a fresh account's first
+on-behalf quote; percentage-based SWIFT fees in the payroll sizing; platform
+report type validation and the reconciliation date window.
+
+Still gated: native Payment Acceptance confirm (kit 4), Airi CLI (kit 9),
+merchant-side Agentic Commerce (kit 10) — the asks above stand.
+
 
 ## When enablement lands — runbook
 
@@ -235,9 +262,9 @@ re-runs resume instead of re-paying.
 - **Kit 4 (native confirm opens):** `npm run kit4` — the stored `intent-*` ids
   resume the already-created intents, then the full arc (confirm → dispute →
   accept/challenge → escalate → resolve) runs. Record it and attach to the release.
-- **Kits 5–8 (business onboarding opens):** `npm run kit5`, `kit6`, `kit7`,
-  `kit8` in order — the `primary_contact` fix is already in, so no code change
-  is needed. Record at least kit 5.
+- **Kits 5–8 (business onboarding opened):** DONE Oct 7 — all four ran green
+  against the sandbox after the live-hardening commits (`3c3173c`, `15ed96f`,
+  `e4c56fb`). Re-run any of them any time; they create fresh accounts per run.
 - **Kit 9 (Airi CLI allowlisted):** follow the install/auth instructions in the
   reply, claim the card budget, then switch the kit's Airi confirm path from
   mock to live.
