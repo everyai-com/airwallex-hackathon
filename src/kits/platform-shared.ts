@@ -1,5 +1,5 @@
 import {
-  activateAndConfirm,
+  activateWhenReady,
   createConnectedAccount,
   getConnectedAccount,
   submitConnectedAccount,
@@ -39,6 +39,20 @@ export async function openConnectedAccount(
   const accountDetails = {
     business_details: {
       business_name: input.businessName,
+      // Live validates this enum (field_required without it) even though the
+      // docs' minimal sample omits it; COMPANY is the closest generic fit.
+      business_structure: 'COMPANY',
+      // Live validates this at submit time (400 field_required, 1..500 chars).
+      description_of_goods_or_services: 'Business and financial software services.',
+      // Live validates the code against GET /api/v1/reference/industry_categories;
+      // ICCV3_0006XX is "Software development" from the Digital and tech group.
+      industry_category_code: 'ICCV3_0006XX',
+      // Live validates supported 2-letter ISO 3166-2 codes at submit time.
+      operating_country: ['US'],
+      account_usage: {
+        product_reference: ['MAKE_TRANSFERS', 'RECEIVE_TRANSFERS', 'CONVERT_FUNDS'],
+        estimated_monthly_revenue: { amount: '100000', currency: 'USD' },
+      },
       business_address: businessAddress,
       registration_address: businessAddress,
       business_identifiers: [{ type: 'EIN', country_code: 'US', number: input.ein }],
@@ -48,7 +62,19 @@ export async function openConnectedAccount(
         first_name: firstName ?? 'Sandbox',
         last_name: lastName ?? 'Owner',
         email: contactEmail,
-        roles: ['AUTHORISED_PERSON'],
+        // US submit requirements: all three roles, DOB, residential address,
+        // nationality, and a primary identification document.
+        roles: ['AUTHORISED_PERSON', 'BENEFICIAL_OWNER', 'DIRECTOR'],
+        residential_address: businessAddress,
+        nationality: input.countryCode,
+        date_of_birth: '1990-01-01',
+        identifications: {
+          primary: {
+            identification_type: 'TAX_ID',
+            issuing_country_code: input.countryCode,
+            tax_id: { number: '123456789', type: 'SSN' },
+          },
+        },
       },
     ],
   };
@@ -60,7 +86,7 @@ export async function openConnectedAccount(
   });
   await updateConnectedAccount(client, created.id, accountDetails);
   await submitConnectedAccount(client, created.id);
-  const active = await activateAndConfirm(client, created.id);
+  const active = await activateWhenReady(client, created.id);
   return active.id;
 }
 

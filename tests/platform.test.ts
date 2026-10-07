@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createConnectedAccount } from '../src/api/accounts.js';
+import { createConnectedAccount, submitConnectedAccount } from '../src/api/accounts.js';
 import { AirwallexClient } from '../src/core/client.js';
 import { createLogger } from '../src/core/log.js';
 import type { Config } from '../src/config.js';
@@ -42,11 +42,14 @@ function testClient(): AirwallexClient {
 
 // --- Connected accounts: live-shaped create ------------------------------------
 
-test('connected-account create carries primary_contact (live rejects without it)', async () => {
+test('connected-account create carries primary_contact and business_structure (live rejects without them)', async () => {
   const client = testClient();
   const accountDetails = {
     business_details: {
       business_name: 'Probe LLC',
+      business_structure: 'COMPANY',
+      industry_category_code: 'ICCV3_0006XX',
+      operating_country: ['US'],
       business_identifiers: [{ type: 'EIN', country_code: 'US', number: '88-0000001' }],
     },
     business_person_details: [{ first_name: 'A', last_name: 'B', roles: ['AUTHORISED_PERSON'] }],
@@ -63,6 +66,29 @@ test('connected-account create carries primary_contact (live rejects without it)
         body: { request_id: 'probe-contact-2', account_details: accountDetails },
       }),
     /primary_contact/,
+  );
+  await assert.rejects(
+    () =>
+      client.request('/api/v1/accounts/create', {
+        body: {
+          request_id: 'probe-structure-1',
+          primary_contact: { email: 'a.b@example.com' },
+          account_details: {
+            business_details: {
+              business_name: 'No Structure LLC',
+              business_identifiers: [{ type: 'EIN', country_code: 'US', number: '88-0000002' }],
+            },
+            business_person_details: [
+              { first_name: 'A', last_name: 'B', roles: ['AUTHORISED_PERSON'] },
+            ],
+          },
+        },
+      }),
+    /business_structure|ensure is one of/,
+  );
+  await assert.rejects(
+    () => submitConnectedAccount(client, account.id),
+    /length is between 1 and 500/,
   );
 });
 

@@ -903,6 +903,31 @@ export class MockTransport implements Transport {
       if (!business?.business_name) {
         fail(400, 'validation_failed', 'account_details.business_details.business_name is required.');
       }
+      // Live validates the enum even though the docs' minimal sample omits it.
+      const businessStructures = [
+        'COMPANY',
+        'CORPORATION',
+        'GENERAL_PARTNERSHIP',
+        'LIMITED_LIABILITY_COMPANY',
+        'LIMITED_LIABILITY_PARTNERSHIP',
+        'LIMITED_PARTNERSHIP',
+        'PARTNERSHIP',
+        'SELF_MANAGED_SUPER_FUND',
+        'SOLE_PROPRIETOR',
+        'NON_REGISTERED_SOLE_PROPRIETOR',
+        'TRUST',
+        'OTHER',
+      ];
+      if (
+        typeof business.business_structure !== 'string' ||
+        !businessStructures.includes(business.business_structure)
+      ) {
+        fail(
+          400,
+          'field_required',
+          `ensure is one of [${businessStructures.join(', ')}]`,
+        );
+      }
       const persons = details.business_person_details as Record<string, any>[] | undefined;
       if (
         !Array.isArray(persons) ||
@@ -956,6 +981,103 @@ export class MockTransport implements Transport {
     if (method === 'POST' && accountSubmitMatch) {
       const account = this.state.accounts.find((item) => item.id === accountSubmitMatch[1]);
       if (!account) fail(404, 'not_found', 'Account not found.');
+      // Live validates this at submit time (400 field_required, 1..500 chars).
+      const submitDetails = account.account_details as Record<string, any> | undefined;
+      const submitBusiness = submitDetails?.business_details as Record<string, any> | undefined;
+      const description = submitBusiness?.description_of_goods_or_services;
+      if (typeof description !== 'string' || description.length < 1 || description.length > 500) {
+        fail(
+          400,
+          'field_required',
+          'ensure length is between 1 and 500 (source: account_details.business_details.description_of_goods_or_services)',
+        );
+      }
+      // Live validates the code against the industry categories reference; the
+      // mock only enforces presence (mirrors the live field_required).
+      const industryCode = submitBusiness?.industry_category_code;
+      if (typeof industryCode !== 'string' || industryCode.length === 0) {
+        fail(
+          400,
+          'field_required',
+          'ensure industry_category_code should be valid value, please refer to Industry categories API',
+        );
+      }
+      const operatingCountry = submitBusiness?.operating_country;
+      if (
+        !Array.isArray(operatingCountry) ||
+        operatingCountry.length === 0 ||
+        !operatingCountry.every((code) => typeof code === 'string' && /^[A-Z]{2}$/.test(code))
+      ) {
+        fail(
+          400,
+          'field_required',
+          'ensure operating_country should be supported 2-letter ISO 3166-2 code',
+        );
+      }
+      const productReference = submitBusiness?.account_usage?.product_reference;
+      const productReferenceValues = [
+        'ACCEPT_ONLINE_PAYMENTS',
+        'COLLECT_MARKETPLACE_PROCEEDS',
+        'RECEIVE_TRANSFERS',
+        'GET_PAID',
+        'CONVERT_FUNDS',
+        'MAKE_TRANSFERS',
+        'CREATE_CARDS',
+        'MANAGE_EXPENSES',
+        'USE_AWX_API',
+        'TRANSFER_CNY_INBOUND',
+      ];
+      if (
+        !Array.isArray(productReference) ||
+        productReference.length === 0 ||
+        !productReference.every(
+          (value) => typeof value === 'string' && productReferenceValues.includes(value),
+        )
+      ) {
+        fail(
+          400,
+          'invalid_argument',
+          `ensure product_reference should be one of [${productReferenceValues.join(', ')}]`,
+        );
+      }
+      const submitPersons = submitDetails?.business_person_details as
+        | Record<string, any>[]
+        | undefined;
+      if (
+        !Array.isArray(submitPersons) ||
+        !submitPersons.every((person) => {
+          const country = person?.residential_address?.country_code;
+          const nationality = person?.nationality;
+          const roles = person?.roles as string[] | undefined;
+          const primary = person?.identifications?.primary as Record<string, any> | undefined;
+          const hasIdentity =
+            typeof primary?.identification_type === 'string' &&
+            typeof primary?.issuing_country_code === 'string' &&
+            (typeof primary?.tax_id?.number === 'string'
+              ? /^\d{9}$/.test(primary.tax_id.number)
+              : typeof primary?.passport?.number === 'string' ||
+                typeof primary?.personal_id?.number === 'string' ||
+                typeof primary?.drivers_license?.number === 'string');
+          return (
+            typeof country === 'string' &&
+            /^[A-Z]{2}$/.test(country) &&
+            typeof nationality === 'string' &&
+            /^[A-Z]{2}$/.test(nationality) &&
+            typeof person?.date_of_birth === 'string' &&
+            Array.isArray(roles) &&
+            roles.includes('AUTHORISED_PERSON') &&
+            roles.includes('BENEFICIAL_OWNER') &&
+            (roles.includes('DIRECTOR') || roles.includes('CONTROLLING_PERSON')) &&
+            hasIdentity
+          );
+        })
+      ) {
+        fail(
+          400,
+          'field_required',
+          'business_person_details must include residential address country, nationality, date of birth, roles (AUTHORISED_PERSON + BENEFICIAL_OWNER + DIRECTOR or CONTROLLING_PERSON) and a primary identification before submit.',
+        );
+      }
       account.status = 'SUBMITTED';
       return { status: 200, data: account };
     }
@@ -966,6 +1088,10 @@ export class MockTransport implements Transport {
     if (method === 'POST' && accountActivateMatch) {
       const account = this.state.accounts.find((item) => item.id === accountActivateMatch[1]);
       if (!account) fail(404, 'not_found', 'Account not found.');
+      // Live refuses activation before the submit transition lands.
+      if (account.status !== 'SUBMITTED') {
+        fail(400, 'bad_request', 'Account needs to be submitted for review before using this endpoint');
+      }
       account.status = String(body.next_status ?? 'ACTIVE');
       return { status: 200, data: account };
     }

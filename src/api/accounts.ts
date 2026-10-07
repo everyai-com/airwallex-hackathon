@@ -1,4 +1,5 @@
 import type { AirwallexClient } from '../core/client.js';
+import { isAirwallexError } from '../core/errors.js';
 import { asRecord } from '../core/parse.js';
 
 export interface ConnectedAccount {
@@ -82,6 +83,31 @@ export async function getConnectedAccount(
     method: 'GET',
   });
   return toAccount(response);
+}
+
+/**
+ * Activate with retries. Live reads SUBMITTED immediately after submit but the
+ * simulation endpoint still refuses for a short window (observed ~2 minutes):
+ * "Account needs to be submitted for review before using this endpoint".
+ * Mock transitions synchronously, so the first attempt succeeds there.
+ */
+export async function activateWhenReady(
+  client: AirwallexClient,
+  accountId: string,
+  attempts = 10,
+  delayMs = 18_000,
+): Promise<ConnectedAccount> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await activateAndConfirm(client, accountId);
+    } catch (error) {
+      lastError = error;
+      if (!isAirwallexError(error) || error.status !== 400) throw error;
+    }
+    await sleep(delayMs);
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
